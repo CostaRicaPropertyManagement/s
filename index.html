@@ -1,509 +1,437 @@
-import React, { useEffect, useMemo, useState, useRef } from "react";
-import { Loader2, MapPin, Search, ExternalLink, RefreshCw, Heart, SortAsc, X, Check, Sparkles } from "lucide-react";
-import Papa from "papaparse";
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Property Finder — Swipe to Decide</title>
 
-/**
- * Alvin's Property Finder — Deluxe + Likes → Google Sheet
- * - Works on GitHub Pages (fully static)
- * - Tinder-style drag decision + explicit "I like it" button
- * - On click, posts a row to your Google Sheet via Google Apps Script web app
- * - No servers you control; just GitHub Pages + Google Sheet
- */
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme:{ extend:{ fontFamily:{ sans:['Inter','ui-sans-serif','system-ui','-apple-system','Segoe UI','Roboto','Arial','sans-serif'] }}}}
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 
-// === 1) CONFIG ===
-const PUBLISHED_SHEET_HTML =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vTKgz7pmoBf2cO2hZ_6qwJh7vHa6RCGxP9277_bHyZyl1wZv1WSQtMP8BnBb-K_wlVs69v9P-JwR6Jj/pubhtml";
-const SHEET_GID = null; // e.g. 0 if you need a specific tab
+  <!-- React (UMD) + Babel so JSX works in-browser -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-// ---- Writeback endpoint (Google Apps Script Web App) ----
-// After you create & deploy the Apps Script (see chat instructions), paste its URL below:
-const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycby_OEW2WZezbI5mzeP-BpAzKD5gBD0vsJBNuzW7qqg-Ua8r6Iimf5FQWadzTKMqpdfM/exec"; // <- TODO: replace
-const ENABLE_WRITEBACK = true; // set false to disable network writes
+  <!-- PapaParse (CSV) -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 
-// === 2) Utilities ===
-const tryBuildCsvUrl = (htmlUrl) => {
-  try {
-    const u = new URL(htmlUrl);
-    const base = u.toString().replace(/\/pubhtml(?:\?.*)?$/, "/pub");
-    const params = new URLSearchParams({ output: "csv", single: "true" });
-    if (SHEET_GID !== null && SHEET_GID !== undefined) params.set("gid", String(SHEET_GID));
-    return `${base}?${params.toString()}`;
-  } catch (e) { return null; }
-};
-
-const currency = (n, currency = "USD") => {
-  if (n === null || n === undefined || isNaN(n)) return "—";
-  try { return new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: 0 }).format(Number(n)); }
-  catch { return `$${Number(n).toLocaleString(undefined, { maximumFractionDigits: 0 })}`; }
-};
-
-const parseNumber = (v) => {
-  if (v === null || v === undefined) return null;
-  const s = String(v).replace(/[^0-9.\-]/g, "");
-  const n = Number(s);
-  return isNaN(n) ? null : n;
-};
-
-const norm = (s) => (s ? String(s).trim() : "");
-
-const detectColumns = (headers) => {
-  const keys = headers.map((h) => h.toLowerCase());
-  const find = (...candidates) => {
-    for (const c of candidates) {
-      const i = keys.findIndex((k) => k === c || k.includes(c));
-      if (i !== -1) return headers[i];
+  <style>
+    html,body{height:100%}
+    body{
+      background:
+        radial-gradient(1200px 600px at -10% -10%, rgba(99,102,241,.25), transparent 60%),
+        radial-gradient(1000px 500px at 110% -10%, rgba(16,185,129,.25), transparent 60%);
     }
-    return null;
-  };
-  return {
-    image: find("image", "photo", "img", "picture", "thumbnail"),
-    title: find("title", "name", "listing"),
-    price: find("price", "rent", "cost"),
-    beds: find("beds", "bedrooms"),
-    baths: find("baths", "bathrooms"),
-    city: find("city", "neighborhood", "area", "district"),
-    address: find("address", "street"),
-    link: find("link", "url", "website", "zillow", "airbnb", "vrbo"),
-    lat: find("lat", "latitude"),
-    lng: find("lng", "lon", "longitude"),
-    sqft: find("sqft", "square feet", "m2", "sqm"),
-  };
-};
+    .grab{cursor:grab} .grabbing{cursor:grabbing}
+  </style>
+</head>
+<body class="font-sans text-slate-900">
+  <div id="root"></div>
 
-const useLocalStorage = (key, init) => {
-  const [state, setState] = useState(() => {
-    try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : init; }
-    catch { return init; }
-  });
-  useEffect(() => { try { localStorage.setItem(key, JSON.stringify(state)); } catch {} }, [key, state]);
-  return [state, setState];
-};
+  <script type="text/babel">
+    const {useEffect,useMemo,useRef,useState} = React;
 
-// === 3) Data fetching ===
-async function fetchCsv(csvUrl) {
-  const res = await fetch(csvUrl, { cache: "no-store" });
-  if (!res.ok) throw new Error(`CSV fetch failed: ${res.status}`);
-  const text = await res.text();
-  return new Promise((resolve, reject) => {
-    Papa.parse(text, { header: true, skipEmptyLines: true, complete: (r) => resolve(r.data), error: (err) => reject(err) });
-  });
-}
+    // ====== CONFIG ======
+    const PUBLISHED_SHEET_HTML =
+      "https://docs.google.com/spreadsheets/d/e/2PACX-1vTKgz7pmoBf2cO2hZ_6qwJh7vHa6RCGxP9277_bHyZyl1wZv1WSQtMP8BnBb-K_wlVs69v9P-JwR6Jj/pubhtml";
+    const SHEET_GID = null; // set to a number if you want a specific tab
 
-async function fetchHtmlTable(htmlUrl) {
-  const res = await fetch(htmlUrl, { cache: "no-store" });
-  if (!res.ok) throw new Error(`HTML fetch failed: ${res.status}`);
-  const html = await res.text();
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const table = doc.querySelector("table");
-  if (!table) throw new Error("No table found in published HTML");
-  const rows = Array.from(table.querySelectorAll("tr"));
-  const headers = Array.from(rows.shift()?.querySelectorAll("th,td") || []).map((c) => c.textContent?.trim() || "");
-  const data = rows.map((r) => {
-    const cells = Array.from(r.querySelectorAll("td")).map((c) => c.textContent?.trim() || "");
-    const obj = {}; headers.forEach((h, i) => (obj[h] = cells[i] ?? ""));
-    return obj;
-  });
-  return data;
-}
+    // *** Paste your Apps Script Web App URL here ***
+    const GAS_ENDPOINT = "https://script.google.com/macros/s/REPLACE_WITH_YOUR_DEPLOYMENT_ID/exec";
+    const ENABLE_WRITEBACK = true; // flip to false to disable sending
 
-function useSheetData(sheetHtmlUrl) {
-  const [data, setData] = useState([]);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  const load = async () => {
-    setLoading(true); setError(null);
-    try {
-      const csvUrl = tryBuildCsvUrl(sheetHtmlUrl);
-      let rows = [];
-      if (csvUrl) {
-        try { rows = await fetchCsv(csvUrl); }
-        catch { rows = await fetchHtmlTable(sheetHtmlUrl); }
-      } else { rows = await fetchHtmlTable(sheetHtmlUrl); }
-      rows = rows.filter((r) => Object.values(r).some((v) => String(v || "").trim() !== ""));
-      setData(rows);
-    } catch (e) { setError(e.message || String(e)); }
-    finally { setLoading(false); }
-  };
-
-  useEffect(() => { load(); }, [sheetHtmlUrl]);
-  return { data, error, loading, reload: load };
-}
-
-// === 4) UI building blocks ===
-const Badge = ({ children }) => (
-  <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-slate-700 border-slate-200 bg-white/70 backdrop-blur">
-    {children}
-  </span>
-);
-const Pill = ({ children }) => (
-  <span className="inline-flex items-center rounded-full bg-slate-900 text-white text-xs px-2 py-0.5">
-    {children}
-  </span>
-);
-const Toggle = ({ pressed, onClick, children }) => (
-  <button onClick={onClick} className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm transition ${pressed ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"}`}>{children}</button>
-);
-const Input = (props) => (<input {...props} className={`w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm outline-none ring-0 focus:border-slate-300 ${props.className || ""}`} />);
-const Select = ({ value, onChange, options, placeholder }) => (
-  <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm text-slate-800">
-    <option value="">{placeholder || "All"}</option>
-    {options.map((o) => (<option key={o} value={o}>{o}</option>))}
-  </select>
-);
-const Card = ({ children }) => (
-  <div className="group rounded-2xl border border-slate-200/60 bg-white/70 backdrop-blur shadow-sm hover:shadow-xl hover:border-slate-300 transition overflow-hidden relative">
-    <div className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition bg-gradient-to-tr from-indigo-50/60 via-transparent to-emerald-50/60" />
-    {children}
-  </div>
-);
-
-// === 5) Tinder-style Decision Slider (no external libs) ===
-function DecisionSlider({ onChoose }) {
-  const trackRef = useRef(null);
-  const knobRef = useRef(null);
-  const [x, setX] = useState(0);
-  const max = 150;
-
-  const onDown = (e) => {
-    e.preventDefault();
-    const startX = (e.touches ? e.touches[0].clientX : e.clientX);
-    const init = x;
-    const move = (ev) => {
-      const clientX = (ev.touches ? ev.touches[0].clientX : ev.clientX);
-      const dx = clientX - startX;
-      const nx = Math.max(-max, Math.min(max, init + dx));
-      setX(nx);
-      document.body.classList.add("grabbing");
+    // ====== Utils ======
+    const tryBuildCsvUrl = (htmlUrl)=>{
+      try{
+        const u = new URL(htmlUrl);
+        const base = u.toString().replace(/\/pubhtml(?:\?.*)?$/,"/pub");
+        const params = new URLSearchParams({output:"csv",single:"true"});
+        if (SHEET_GID!=null) params.set("gid", String(SHEET_GID));
+        return `${base}?${params.toString()}`;
+      }catch{return null;}
     };
-    const up = () => {
-      document.removeEventListener("mousemove", move);
-      document.removeEventListener("mouseup", up);
-      document.removeEventListener("touchmove", move);
-      document.removeEventListener("touchend", up);
-      document.body.classList.remove("grabbing");
-      if (x > 90) onChoose("like");
-      else if (x < -90) onChoose("nope");
-      setX(0);
+    const currency=(n,code="USD")=>{
+      const v=Number(n); if(Number.isNaN(v)) return "—";
+      try{ return new Intl.NumberFormat(undefined,{style:"currency",currency:code,maximumFractionDigits:0}).format(v);}
+      catch{ return "$"+v.toLocaleString(undefined,{maximumFractionDigits:0}); }
     };
-    document.addEventListener("mousemove", move);
-    document.addEventListener("mouseup", up);
-    document.addEventListener("touchmove", move, { passive:false });
-    document.addEventListener("touchend", up);
-  };
+    const parseNumber = (v)=>{
+      if(v==null) return null;
+      const s=String(v).replace(/[^0-9.\-]/g,""); const n=Number(s);
+      return Number.isNaN(n)?null:n;
+    };
+    const norm = (s)=> s ? String(s).trim() : "";
 
-  const bg = x > 0 ? `rgba(16,185,129,${Math.min(0.25, Math.abs(x)/max*0.25)})` : x < 0 ? `rgba(239,68,68,${Math.min(0.25, Math.abs(x)/max*0.25)})` : "rgba(229,231,235,0.6)";
-  const label = x > 50 ? "Like" : x < -50 ? "Nope" : "—";
-
-  return (
-    <div ref={trackRef} className="relative w-full select-none rounded-xl border border-slate-200 px-2 py-2" style={{ background: bg }}>
-      <div className="flex items-center justify-between text-xs font-medium text-slate-600 px-2">
-        <span className="flex items-center gap-1">✖️ Don't like</span>
-        <span className="opacity-60">Drag</span>
-        <span className="flex items-center gap-1">Like ✅</span>
-      </div>
-      <div
-        ref={knobRef}
-        onMouseDown={onDown}
-        onTouchStart={onDown}
-        className="mt-2 mx-auto w-11/12 h-10 rounded-lg bg-white shadow border border-slate-200 grid place-items-center cursor-grab active:cursor-grabbing"
-        style={{ transform: `translateX(${x}px)`, transition: x===0 ? "transform .15s ease" : "none" }}
-      >
-        <span className="text-sm text-slate-700" style={{ userSelect: "none" }}>{label}</span>
-      </div>
-    </div>
-  );
-}
-
-// === 6) Main App ===
-export default function App() {
-  const { data, error, loading, reload } = useSheetData(PUBLISHED_SHEET_HTML);
-  const [favorites, setFavorites] = useLocalStorage("pfavorites", {});
-  const [votes, setVotes] = useLocalStorage("pdecisions", {}); // key -> 'like' | 'nope'
-
-  const headers = useMemo(() => (data[0] ? Object.keys(data[0]) : []), [data]);
-  const cols = useMemo(() => detectColumns(headers), [headers]);
-
-  // Filters
-  const [q, setQ] = useState("");
-  const [city, setCity] = useState("");
-  const [minPrice, setMinPrice] = useState("");
-  const [maxPrice, setMaxPrice] = useState("");
-  const [minBeds, setMinBeds] = useState("");
-  const [minBaths, setMinBaths] = useState("");
-  const [sortKey, setSortKey] = useState("price-desc");
-  const [showOnlyFavs, setShowOnlyFavs] = useState(false);
-  const [filterDecision, setFilterDecision] = useState("all"); // all | like | nope | undecided
-
-  const cities = useMemo(() => {
-    const c = new Set();
-    data.forEach((r) => { if (cols.city && r[cols.city]) c.add(norm(r[cols.city])); });
-    return Array.from(c).filter(Boolean).sort();
-  }, [data, cols.city]);
-
-  const processed = useMemo(() => {
-    if (!data.length) return [];
-
-    const normRow = (r) => {
-      const priceN = parseNumber(cols.price ? r[cols.price] : null);
-      const bedsN = parseNumber(cols.beds ? r[cols.beds] : null);
-      const bathsN = parseNumber(cols.baths ? r[cols.baths] : null);
-      const cityS = norm(cols.city ? r[cols.city] : "");
-      const titleS = norm(cols.title ? r[cols.title] : "");
-      const addrS = norm(cols.address ? r[cols.address] : "");
-      const linkS = norm(cols.link ? r[cols.link] : "");
-      const imgS = norm(cols.image ? r[cols.image] : "");
-      const sqftN = parseNumber(cols.sqft ? r[cols.sqft] : null);
-      const key = JSON.stringify(r);
-      const decision = votes[key] || "";
-      return { raw: r, priceN, bedsN, bathsN, cityS, titleS, addrS, linkS, imgS, sqftN, key, decision };
+    const detectColumns = (headers)=>{
+      const keys=headers.map(h=>h.toLowerCase());
+      const find=(...cands)=>{
+        for(const c of cands){ const i=keys.findIndex(k=>k===c || k.includes(c)); if(i!==-1) return headers[i]; }
+        return null;
+      };
+      return {
+        image:  find("image","photo","img","thumbnail","picture"),
+        title:  find("title","name","listing"),
+        price:  find("price","rent","cost"),
+        beds:   find("beds","bedrooms","bed"),
+        baths:  find("baths","bathrooms","bath"),
+        city:   find("city","neighborhood","area","district"),
+        address:find("address","street"),
+        link:   find("link","url","website","zillow","airbnb","vrbo"),
+        sqft:   find("sqft","square feet","m2","sqm"),
+      };
     };
 
-    let rows = data.map(normRow);
-
-    // Text search
-    if (q.trim()) {
-      const needle = q.toLowerCase();
-      rows = rows.filter(({ raw }) => headers.some((h) => String(raw[h] || "").toLowerCase().includes(needle)));
-    }
-
-    // Filters
-    if (city) rows = rows.filter((r) => r.cityS.toLowerCase() === city.toLowerCase());
-    if (minPrice) rows = rows.filter((r) => r.priceN === null ? true : r.priceN >= Number(minPrice));
-    if (maxPrice) rows = rows.filter((r) => r.priceN === null ? true : r.priceN <= Number(maxPrice));
-    if (minBeds) rows = rows.filter((r) => r.bedsN === null ? true : r.bedsN >= Number(minBeds));
-    if (minBaths) rows = rows.filter((r) => r.bathsN === null ? true : r.bathsN >= Number(minBaths));
-    if (showOnlyFavs) rows = rows.filter((r) => favorites[r.key]);
-
-    if (filterDecision !== "all") {
-      if (filterDecision === "undecided") rows = rows.filter((r) => !r.decision);
-      else rows = rows.filter((r) => r.decision === filterDecision);
-    }
-
-    // Sorters
-    const sorters = {
-      "price-asc": (a, b) => (a.priceN ?? Infinity) - (b.priceN ?? Infinity),
-      "price-desc": (a, b) => (b.priceN ?? -Infinity) - (a.priceN ?? -Infinity),
-      "beds-desc": (a, b) => (b.bedsN ?? -Infinity) - (a.bedsN ?? -Infinity),
-      "baths-desc": (a, b) => (b.bathsN ?? -Infinity) - (a.bathsN ?? -Infinity),
-      "city-asc": (a, b) => a.cityS.localeCompare(b.cityS),
-      "liked-first": (a, b) => (b.decision === "like") - (a.decision === "like"),
+    const useLocal=(key,init)=>{
+      const [state,setState]=useState(()=>{ try{const raw=localStorage.getItem(key); return raw?JSON.parse(raw):init;}catch{return init;}});
+      useEffect(()=>{ try{localStorage.setItem(key,JSON.stringify(state));}catch{} },[key,state]);
+      return [state,setState];
     };
-    rows.sort(sorters[sortKey] || (() => 0));
 
-    return rows;
-  }, [data, headers, cols, q, city, minPrice, maxPrice, minBeds, minBaths, sortKey, favorites, showOnlyFavs, votes, filterDecision]);
-
-  const toggleFav = (key) => setFavorites((prev) => ({ ...prev, [key]: !prev[key] }));
-  const choose = async (key, val) => {
-    setVotes((prev) => ({ ...prev, [key]: val }));
-    if (val === "like") {
-      const item = processed.find((r) => r.key === key);
-      if (item) await sendLikeToSheet(item);
+    // ====== Data hook ======
+    function useSheetData(sheetHtmlUrl){
+      const [data,setData]=useState([]), [loading,setLoading]=useState(true), [error,setError]=useState(null);
+      const load=async()=>{
+        setLoading(true); setError(null);
+        try{
+          const csvUrl=tryBuildCsvUrl(sheetHtmlUrl);
+          let rows=[];
+          if(csvUrl){
+            try{
+              const res=await fetch(csvUrl,{cache:"no-store"});
+              if(!res.ok) throw new Error("CSV fetch failed");
+              const text=await res.text();
+              rows = Papa.parse(text,{header:true,skipEmptyLines:true}).data;
+            }catch{
+              rows = await fetchHtmlTable(sheetHtmlUrl);
+            }
+          }else{
+            rows = await fetchHtmlTable(sheetHtmlUrl);
+          }
+          rows = rows.filter(r=>Object.values(r).some(v=>String(v||"").trim()!==""));
+          setData(rows);
+        }catch(e){ setError(String(e?.message||e)); }
+        finally{ setLoading(false); }
+      };
+      async function fetchHtmlTable(htmlUrl){
+        const res=await fetch(htmlUrl,{cache:"no-store"});
+        if(!res.ok) throw new Error("HTML fetch failed");
+        const html=await res.text();
+        const doc=new DOMParser().parseFromString(html,"text/html");
+        const table=doc.querySelector("table"); if(!table) return [];
+        const rows=Array.from(table.querySelectorAll("tr"));
+        const headers=Array.from(rows.shift()?.querySelectorAll("th,td")||[]).map(c=>c.textContent?.trim()||"");
+        return rows.map(r=>{
+          const cells=Array.from(r.querySelectorAll("td")).map(c=>c.textContent?.trim()||"");
+          const obj={}; headers.forEach((h,i)=>obj[h]=cells[i]??""); return obj;
+        });
+      }
+      useEffect(()=>{ load(); },[sheetHtmlUrl]);
+      return {data,loading,error,reload:load};
     }
-  };
 
-  async function sendLikeToSheet(item) {
-    if (!ENABLE_WRITEBACK || !GAS_ENDPOINT || GAS_ENDPOINT.includes("REPLACE_WITH")) return;
-    const payload = {
-      action: "like",
-      timestamp: new Date().toISOString(),
-      key: item.key,
-      title: item.titleS,
-      address: item.addrS,
-      city: item.cityS,
-      price: item.priceN,
-      link: item.linkS,
-      image: item.imgS,
-      sqft: item.sqftN,
-      userAgent: navigator.userAgent,
-    };
-    try {
-      // no-cors so it works from GitHub Pages without CORS preflight
-      await fetch(GAS_ENDPOINT, {
-        method: "POST",
-        mode: "no-cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      // Optimistic UI; we can't read the response in no-cors mode
-    } catch (e) {
-      console.warn("Like writeback failed:", e);
-    }
-  }
+    // ====== UI atoms ======
+    const Badge=({children})=>
+      <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-slate-700 border-slate-200 bg-white/70 backdrop-blur">{children}</span>;
+    const Pill=({children})=>
+      <span className="inline-flex items-center rounded-full bg-slate-900 text-white text-xs px-2 py-0.5">{children}</span>;
+    const Toggle=({pressed,onClick,children})=>
+      <button onClick={onClick} className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm transition ${pressed?"bg-slate-900 text-white border-slate-900":"bg-white border-slate-200 text-slate-700 hover:bg-slate-50"}`}>{children}</button>;
+    const Input=(props)=>
+      <input {...props} className={`w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm outline-none focus:border-slate-300 ${props.className||""}`}/>;
+    const Select=({value,onChange,options,placeholder})=>
+      <select value={value} onChange={(e)=>onChange(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm text-slate-800">
+        <option value="">{placeholder||"All"}</option>
+        {options.map(o=><option key={o} value={o}>{o}</option>)}
+      </select>;
+    const Card=({children})=>
+      <div className="group rounded-2xl border border-slate-200/60 bg-white/70 backdrop-blur shadow-sm hover:shadow-xl hover:border-slate-300 transition overflow-hidden relative">
+        <div className="absolute inset-0 pointer-events-none opacity-0 group-hover:opacity-100 transition bg-gradient-to-tr from-indigo-50/60 via-transparent to-emerald-50/60"></div>
+        {children}
+      </div>;
 
-  // === Layout ===
-  return (
-    <div className="min-h-screen bg-[radial-gradient(1200px_600px_at_-10%_-10%,rgba(99,102,241,0.25),transparent_60%),radial-gradient(1000px_500px_at_110%_-10%,rgba(16,185,129,0.25),transparent_60%)]">
-      {/* HERO */}
-      <div className="relative">
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-white pointer-events-none" />
-        <header className="sticky top-0 z-30 backdrop-blur-xl bg-white/60 border-b border-white/40">
-          <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-600 to-emerald-500 text-white grid place-items-center font-bold shadow">PF</div>
-              <div>
-                <h1 className="text-lg font-semibold text-slate-900 flex items-center gap-2">Property Finder <Sparkles className="h-4 w-4 text-amber-500" /></h1>
-                <p className="text-xs text-slate-600">Swipe. Decide. Share — powered by Google Sheets</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={reload} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm hover:bg-white">
-                <RefreshCw className="h-4 w-4" /> Refresh
-              </button>
-              <a className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm hover:bg-white" href={PUBLISHED_SHEET_HTML} target="_blank" rel="noreferrer">
-                <ExternalLink className="h-4 w-4" /> Sheet
-              </a>
-            </div>
+    // ====== Tinder-style slider (no libs) ======
+    function DecisionSlider({ onChoose }){
+      const [x,setX]=useState(0), max=150;
+      const onDown=(e)=>{
+        e.preventDefault();
+        const startX=(e.touches?e.touches[0].clientX:e.clientX), init=x;
+        const move=(ev)=>{
+          const clientX=(ev.touches?ev.touches[0].clientX:ev.clientX);
+          const nx=Math.max(-max, Math.min(max, init + (clientX-startX)));
+          setX(nx); document.body.classList.add("grabbing");
+        };
+        const up=()=>{
+          document.removeEventListener("mousemove",move);
+          document.removeEventListener("mouseup",up);
+          document.removeEventListener("touchmove",move);
+          document.removeEventListener("touchend",up);
+          document.body.classList.remove("grabbing");
+          if (x>90) onChoose("like"); else if (x<-90) onChoose("nope");
+          setX(0);
+        };
+        document.addEventListener("mousemove",move);
+        document.addEventListener("mouseup",up);
+        document.addEventListener("touchmove",move,{passive:false});
+        document.addEventListener("touchend",up);
+      };
+      const bg = x>0 ? `rgba(16,185,129,${Math.min(.25, Math.abs(x)/max*.25)})`
+                     : x<0 ? `rgba(239,68,68,${Math.min(.25, Math.abs(x)/max*.25)})`
+                           : "rgba(229,231,235,.6)";
+      const label = x>50 ? "Like" : x<-50 ? "Nope" : "—";
+      return (
+        <div className="relative w-full select-none rounded-xl border border-slate-200 px-2 py-2" style={{background:bg}}>
+          <div className="flex items-center justify-between text-xs font-medium text-slate-600 px-2">
+            <span>✖️ Don’t like</span><span className="opacity-60">Drag</span><span>Like ✅</span>
           </div>
-        </header>
+          <div onMouseDown={onDown} onTouchStart={onDown}
+               className="mt-2 mx-auto w-11/12 h-10 rounded-lg bg-white shadow border border-slate-200 grid place-items-center grab"
+               style={{transform:`translateX(${x}px)`, transition:x===0?"transform .15s ease":"none"}}>
+            <span className="text-sm text-slate-700">{label}</span>
+          </div>
+        </div>
+      );
+    }
 
-        <section className="mx-auto max-w-7xl px-4 pt-8 pb-4">
-          <div className="rounded-3xl border border-white/30 bg-white/60 backdrop-blur-xl p-6 shadow-xl">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
-              <div className="md:col-span-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search any field (address, notes, etc.)" className="pl-9" />
+    // ====== App ======
+    function App(){
+      const {data,loading,error,reload}=useSheetData(PUBLISHED_SHEET_HTML);
+      const [favorites,setFavorites]=useLocal("pfavorites",{});
+      const [votes,setVotes]=useLocal("pdecisions",{});
+      const [q,setQ]=useState(""), [city,setCity]=useState("");
+      const [minPrice,setMinPrice]=useState(""), [maxPrice,setMaxPrice]=useState("");
+      const [minBeds,setMinBeds]=useState(""), [minBaths,setMinBaths]=useState("");
+      const [sortKey,setSortKey]=useState("price-desc");
+      const [showOnlyFavs,setShowOnlyFavs]=useState(false);
+      const [filterDecision,setFilterDecision]=useState("all");
+
+      const headers=useMemo(()=> data[0]?Object.keys(data[0]):[],[data]);
+      const cols=useMemo(()=>detectColumns(headers),[headers]);
+
+      const cities=useMemo(()=>{
+        const c=new Set(); data.forEach(r=>{ if(cols.city && r[cols.city]) c.add(norm(r[cols.city]));});
+        return Array.from(c).filter(Boolean).sort();
+      },[data,cols.city]);
+
+      const processed=useMemo(()=>{
+        const normRow=(r)=>{
+          const priceN=parseNumber(cols.price? r[cols.price]:null);
+          const bedsN =parseNumber(cols.beds ? r[cols.beds] :null);
+          const bathsN=parseNumber(cols.baths? r[cols.baths]:null);
+          const cityS =norm(cols.city? r[cols.city] :"");
+          const titleS=norm(cols.title? r[cols.title] :"");
+          const addrS =norm(cols.address? r[cols.address] :"");
+          const linkS =norm(cols.link? r[cols.link] :"");
+          const imgS  =norm(cols.image? r[cols.image] :"");
+          const sqftN =parseNumber(cols.sqft? r[cols.sqft]:null);
+          const key=JSON.stringify(r);
+          const decision=votes[key]||"";
+          return {raw:r,priceN,bedsN,bathsN,cityS,titleS,addrS,linkS,imgS,sqftN,key,decision};
+        };
+        let rows=data.map(normRow);
+        if(q.trim()){
+          const needle=q.toLowerCase();
+          rows=rows.filter(({raw})=>headers.some(h=>String(raw[h]||"").toLowerCase().includes(needle)));
+        }
+        if(city) rows=rows.filter(r=>r.cityS.toLowerCase()===city.toLowerCase());
+        if(minPrice) rows=rows.filter(r=>r.priceN==null?true:r.priceN>=Number(minPrice));
+        if(maxPrice) rows=rows.filter(r=>r.priceN==null?true:r.priceN<=Number(maxPrice));
+        if(minBeds) rows=rows.filter(r=>r.bedsN==null?true:r.bedsN>=Number(minBeds));
+        if(minBaths) rows=rows.filter(r=>r.bathsN==null?true:r.bathsN>=Number(minBaths));
+        if(showOnlyFavs) rows=rows.filter(r=>favorites[r.key]);
+        if(filterDecision!=="all"){
+          if(filterDecision==="undecided") rows=rows.filter(r=>!r.decision);
+          else rows=rows.filter(r=>r.decision===filterDecision);
+        }
+        const sorters={
+          "price-asc": (a,b)=>(a.priceN??Infinity)-(b.priceN??Infinity),
+          "price-desc":(a,b)=>(b.priceN??-Infinity)-(a.priceN??-Infinity),
+          "beds-desc": (a,b)=>(b.bedsN ??-Infinity)-(a.bedsN ??-Infinity),
+          "baths-desc":(a,b)=>(b.bathsN??-Infinity)-(a.bathsN??-Infinity),
+          "city-asc":  (a,b)=>a.cityS.localeCompare(b.cityS),
+          "liked-first":(a,b)=>(b.decision==="like")-(a.decision==="like"),
+        };
+        rows.sort(sorters[sortKey]||(()=>0));
+        return rows;
+      },[data,headers,cols,q,city,minPrice,maxPrice,minBeds,minBaths,sortKey,favorites,showOnlyFavs,votes,filterDecision]);
+
+      const toggleFav=(key)=> setFavorites(prev=>({...prev,[key]:!prev[key]}));
+      const choose=async(key,val)=>{
+        setVotes(prev=>({...prev,[key]:val}));
+        if(val==="like"){
+          const item=processed.find(r=>r.key===key);
+          if(item) await sendLikeToSheet(item);
+        }
+      };
+
+      async function sendLikeToSheet(item){
+        if(!ENABLE_WRITEBACK || !GAS_ENDPOINT || GAS_ENDPOINT.includes("REPLACE_WITH")) return;
+        const payload={
+          action:"like",
+          timestamp:new Date().toISOString(),
+          key:item.key, title:item.titleS, address:item.addrS, city:item.cityS,
+          price:item.priceN, link:item.linkS, image:item.imgS, sqft:item.sqftN,
+          userAgent:navigator.userAgent,
+        };
+        try{
+          await fetch(GAS_ENDPOINT,{ method:"POST", mode:"no-cors",
+            headers:{ "Content-Type":"application/json" }, body:JSON.stringify(payload) });
+        }catch(e){ console.warn("Like writeback failed:", e); }
+      }
+
+      return (
+        <div className="min-h-screen">
+          <header className="sticky top-0 z-30 backdrop-blur-xl bg-white/60 border-b border-white/40">
+            <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-600 to-emerald-500 text-white grid place-items-center font-bold shadow">PF</div>
+                <div>
+                  <h1 className="text-lg font-semibold flex items-center gap-2">Property Finder <span className="text-amber-500">✨</span></h1>
+                  <p className="text-xs text-slate-600">Swipe. Decide. Share — powered by Google Sheets</p>
                 </div>
-              </div>
-              <div className="md:col-span-2"><Select value={city} onChange={setCity} options={cities} placeholder="All cities" /></div>
-              <div className="md:col-span-2"><Input type="number" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} placeholder="Min price" /></div>
-              <div className="md:col-span-2"><Input type="number" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} placeholder="Max price" /></div>
-              <div className="md:col-span-1"><Input type="number" value={minBeds} onChange={(e) => setMinBeds(e.target.value)} placeholder="Min beds" /></div>
-              <div className="md:col-span-1"><Input type="number" value={minBaths} onChange={(e) => setMinBaths(e.target.value)} placeholder="Min baths" /></div>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Toggle pressed={showOnlyFavs} onClick={() => setShowOnlyFavs((v) => !v)}><Heart className="h-4 w-4" /> Favorites</Toggle>
-                <Toggle pressed={filterDecision === "like"} onClick={() => setFilterDecision(filterDecision === "like" ? "all" : "like")}>Liked</Toggle>
-                <Toggle pressed={filterDecision === "nope"} onClick={() => setFilterDecision(filterDecision === "nope" ? "all" : "nope")}>Nope</Toggle>
-                <Toggle pressed={filterDecision === "undecided"} onClick={() => setFilterDecision(filterDecision === "undecided" ? "all" : "undecided")}>Undecided</Toggle>
               </div>
               <div className="flex items-center gap-2">
-                <SortAsc className="h-4 w-4 text-slate-500" />
-                <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm">
-                  <option value="price-desc">Sort: Price ↓</option>
-                  <option value="price-asc">Sort: Price ↑</option>
-                  <option value="beds-desc">Sort: Beds ↓</option>
-                  <option value="baths-desc">Sort: Baths ↓</option>
-                  <option value="city-asc">Sort: City A→Z</option>
-                  <option value="liked-first">Sort: Liked first</option>
-                </select>
-                <span className="inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-2 py-1 text-xs text-slate-700">{processed.length} results</span>
+                <button onClick={reload} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm hover:bg-white">⟳ Refresh</button>
+                <a className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm hover:bg-white" href={PUBLISHED_SHEET_HTML} target="_blank" rel="noreferrer">⇱ Sheet</a>
               </div>
             </div>
-          </div>
-        </section>
-      </div>
+          </header>
 
-      {/* GRID */}
-      <main className="mx-auto max-w-7xl px-4 pb-10">
-        {loading && (<div className="mt-6 flex items-center gap-2 text-slate-700"><Loader2 className="h-4 w-4 animate-spin" /> Loading properties…</div>)}
-        {error && (<div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{String(error)}</div>)}
-        {!loading && !error && processed.length === 0 && (<div className="mt-6 text-slate-600">No matches found. Try clearing filters.</div>)}
-
-        <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {processed.map((item, idx) => {
-            const { priceN, bedsN, bathsN, cityS, titleS, addrS, linkS, imgS, sqftN, key } = item;
-            const displayTitle = titleS || addrS || cityS || `Property #${idx + 1}`;
-            const isFav = !!favorites[key];
-            const decision = votes[key];
-
-            return (
-              <Card key={idx}>
-                <div className="relative aspect-[16/10] w-full bg-slate-100 overflow-hidden">
-                  {imgS ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={imgS} alt={displayTitle} className="h-full w-full object-cover" loading="lazy" />
-                  ) : (
-                    <div className="absolute inset-0 grid place-items-center text-slate-400"><MapPin className="h-8 w-8" /></div>
-                  )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/0 to-transparent" />
-                  <div className="absolute left-3 top-3 flex items-center gap-2">
-                    {decision === "like" && <span className="rounded-lg bg-emerald-500/90 text-white text-xs px-2 py-1">LIKED</span>}
-                    {decision === "nope" && <span className="rounded-lg bg-rose-500/90 text-white text-xs px-2 py-1">NOPE</span>}
-                  </div>
-                  <button onClick={() => toggleFav(key)} className={`absolute right-3 top-3 rounded-full border bg-white/90 p-2 transition ${isFav ? "text-rose-600 border-rose-200" : "text-slate-700 border-slate-200 hover:bg-white"}`} title={isFav ? "Remove favorite" : "Add favorite"}>
-                    <Heart className={`h-4 w-4 ${isFav ? "fill-current" : ""}`} />
-                  </button>
-                </div>
-                <div className="p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <h3 className="line-clamp-1 text-base font-semibold text-slate-900">{displayTitle}</h3>
-                    {priceN !== null && <Pill>{currency(priceN)}</Pill>}
-                  </div>
-                  <div className="mt-1 text-sm text-slate-600 line-clamp-2">{[addrS, cityS].filter(Boolean).join(" · ")}</div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {bedsN !== null && <Badge>{bedsN} beds</Badge>}
-                    {bathsN !== null && <Badge>{bathsN} baths</Badge>}
-                    {sqftN !== null && <Badge>{sqftN.toLocaleString()} sqft</Badge>}
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => choose(key, "nope")}
-                      className="rounded-xl border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2 text-sm hover:bg-rose-100"
-                    >✖️ Don't like</button>
-                    <button
-                      onClick={() => choose(key, "like")}
-                      className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 px-3 py-2 text-sm hover:bg-emerald-100"
-                    >❤️ I like it</button>
-                  </div>
-
-                  <div className="mt-3">
-                    <DecisionSlider onChoose={(val) => choose(key, val)} />
-                  </div>
-
-                  <div className="mt-4 flex items-center justify-between">
-                    <div className="text-xs text-slate-400">Clicks sync to sheet when enabled</div>
-                    {linkS && (
-                      <a href={linkS} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700">
-                        View <ExternalLink className="h-4 w-4" />
-                      </a>
-                    )}
+          <section className="mx-auto max-w-7xl px-4 pt-8 pb-4">
+            <div className="rounded-3xl border border-white/30 bg-white/60 backdrop-blur-xl p-6 shadow-xl">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+                <div className="md:col-span-4">
+                  <div className="relative">
+                    <span className="absolute left-3 top-2.5 text-slate-400">🔎</span>
+                    <Input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search any field (address, notes, etc.)" className="pl-9"/>
                   </div>
                 </div>
-              </Card>
-            );
-          })}
-        </section>
+                <div className="md:col-span-2"><Select value={city} onChange={setCity} options={cities} placeholder="All cities"/></div>
+                <div className="md:col-span-2"><Input type="number" value={minPrice} onChange={(e)=>setMinPrice(e.target.value)} placeholder="Min price"/></div>
+                <div className="md:col-span-2"><Input type="number" value={maxPrice} onChange={(e)=>setMaxPrice(e.target.value)} placeholder="Max price"/></div>
+                <div className="md:col-span-1"><Input type="number" value={minBeds} onChange={(e)=>setMinBeds(e.target.value)} placeholder="Min beds"/></div>
+                <div className="md:col-span-1"><Input type="number" value={minBaths} onChange={(e)=>setMinBaths(e.target.value)} placeholder="Min baths"/></div>
+              </div>
 
-        {/* Table fallback / full data view */}
-        {processed.length > 0 && (
-          <details className="mt-10 group">
-            <summary className="cursor-pointer text-sm text-slate-600 hover:text-slate-800">Show full table</summary>
-            <div className="mt-3 overflow-auto rounded-xl border border-slate-200 bg-white">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr>
-                    {headers.map((h) => (<th key={h} className="px-3 py-2 text-left font-medium border-b border-slate-200">{h}</th>))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {processed.map(({ raw }, i) => (
-                    <tr key={i} className="odd:bg-white even:bg-slate-50/40">
-                      {headers.map((h) => (<td key={h} className="px-3 py-2 border-b border-slate-100 align-top">{String(raw[h] ?? "")}</td>))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Toggle pressed={showOnlyFavs} onClick={()=>setShowOnlyFavs(v=>!v)}>❤️ Favorites</Toggle>
+                  <Toggle pressed={filterDecision==="like"} onClick={()=>setFilterDecision(filterDecision==="like"?"all":"like")}>Liked</Toggle>
+                  <Toggle pressed={filterDecision==="nope"} onClick={()=>setFilterDecision(filterDecision==="nope"?"all":"nope")}>Nope</Toggle>
+                  <Toggle pressed={filterDecision==="undecided"} onClick={()=>setFilterDecision(filterDecision==="undecided"?"all":"undecided")}>Undecided</Toggle>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-500 text-sm">Sort</span>
+                  <select value={sortKey} onChange={(e)=>setSortKey(e.target.value)} className="rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-sm">
+                    <option value="price-desc">Price ↓</option>
+                    <option value="price-asc">Price ↑</option>
+                    <option value="beds-desc">Beds ↓</option>
+                    <option value="baths-desc">Baths ↓</option>
+                    <option value="city-asc">City A→Z</option>
+                    <option value="liked-first">Liked first</option>
+                  </select>
+                  <span className="inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-2 py-1 text-xs text-slate-700">{processed.length} results</span>
+                </div>
+              </div>
             </div>
-          </details>
-        )}
-      </main>
+          </section>
 
-      <footer className="mt-10 border-t border-white/40 bg-white/60 backdrop-blur">
-        <div className="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-slate-600">
-          Made for Alvin · Swipe to decide · Deploy to GitHub Pages
+          <main className="mx-auto max-w-7xl px-4 pb-10">
+            {loading && <div className="mt-6 text-slate-700 flex items-center gap-2"><span className="animate-spin">⏳</span> Loading properties…</div>}
+            {error && <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{String(error)}</div>}
+            {!loading && !error && processed.length===0 && <div className="mt-6 text-slate-600">No matches found. Try clearing filters.</div>}
+
+            <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {processed.map((item, idx)=>{
+                const { priceN,bedsN,bathsN,cityS,titleS,addrS,linkS,imgS,sqftN,key } = item;
+                const displayTitle = titleS || addrS || cityS || `Property #${idx+1}`;
+                const isFav=!!favorites[key], decision=votes[key];
+
+                return (
+                  <Card key={idx}>
+                    <div className="relative aspect-[16/10] w-full bg-slate-100 overflow-hidden">
+                      {imgS ? <img src={imgS} alt={displayTitle} className="h-full w-full object-cover" loading="lazy"/> :
+                               <div className="absolute inset-0 grid place-items-center text-slate-400 text-3xl">📍</div>}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/0 to-transparent"></div>
+                      <div className="absolute left-3 top-3 flex items-center gap-2">
+                        {decision==="like" && <span className="rounded-lg bg-emerald-500/90 text-white text-xs px-2 py-1">LIKED</span>}
+                        {decision==="nope" && <span className="rounded-lg bg-rose-500/90 text-white text-xs px-2 py-1">NOPE</span>}
+                      </div>
+                      <button onClick={()=>toggleFav(key)}
+                        className={`absolute right-3 top-3 rounded-full border bg-white/90 px-3 py-1 text-sm transition ${isFav?"text-rose-600 border-rose-200":"text-slate-700 border-slate-200 hover:bg-white"}`}
+                        title={isFav?"Remove favorite":"Add favorite"}>
+                        {isFav?"❤️":"🤍"}
+                      </button>
+                    </div>
+
+                    <div className="p-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="line-clamp-1 text-base font-semibold">{displayTitle}</h3>
+                        {priceN!==null && <Pill>{currency(priceN)}</Pill>}
+                      </div>
+                      <div className="mt-1 text-sm text-slate-600 line-clamp-2">{[addrS,cityS].filter(Boolean).join(" · ")}</div>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        {bedsN!==null && <Badge>{bedsN} beds</Badge>}
+                        {bathsN!==null && <Badge>{bathsN} baths</Badge>}
+                        {sqftN!==null && <Badge>{sqftN.toLocaleString()} sqft</Badge>}
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <button onClick={()=>choose(key,"nope")}
+                          className="rounded-xl border border-rose-200 bg-rose-50 text-rose-700 px-3 py-2 text-sm hover:bg-rose-100">✖️ Don’t like</button>
+                        <button onClick={()=>choose(key,"like")}
+                          className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 px-3 py-2 text-sm hover:bg-emerald-100">❤️ I like it</button>
+                      </div>
+
+                      <div className="mt-3">
+                        <DecisionSlider onChoose={(val)=>choose(key,val)}/>
+                      </div>
+
+                      <div className="mt-4 flex items-center justify-between">
+                        <div className="text-xs text-slate-400">Clicks sync to sheet when enabled</div>
+                        {linkS && <a href={linkS} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700">View ↗</a>}
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </section>
+
+            {processed.length>0 && (
+              <details className="mt-10 group">
+                <summary className="cursor-pointer text-sm text-slate-600 hover:text-slate-800">Show full table</summary>
+                <div className="mt-3 overflow-auto rounded-xl border border-slate-200 bg-white">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>{headers.map(h=> <th key={h} className="px-3 py-2 text-left font-medium border-b border-slate-200">{h}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {processed.map(({raw},i)=>(
+                        <tr key={i} className="odd:bg-white even:bg-slate-50/40">
+                          {headers.map(h=> <td key={h} className="px-3 py-2 border-b border-slate-100 align-top">{String(raw[h] ?? "")}</td>)}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            )}
+          </main>
+
+          <footer className="mt-10 border-t border-white/40 bg-white/60 backdrop-blur">
+            <div className="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-slate-600">
+              Made for Alvin · Swipe to decide · GitHub Pages
+            </div>
+          </footer>
         </div>
-      </footer>
+      );
+    }
 
-      {/* Fonts & styles for preview */}
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    </div>
-  );
-}
-
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
