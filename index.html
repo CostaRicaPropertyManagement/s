@@ -41,9 +41,9 @@
       "https://docs.google.com/spreadsheets/d/e/2PACX-1vTKgz7pmoBf2cO2hZ_6qwJh7vHa6RCGxP9277_bHyZyl1wZv1WSQtMP8BnBb-K_wlVs69v9P-JwR6Jj/pubhtml";
     const SHEET_GID = null; // set to a number if you want a specific tab
 
-    // *** Paste your Apps Script Web App URL here ***
-    const GAS_ENDPOINT = "https://script.google.com/macros/s/REPLACE_WITH_YOUR_DEPLOYMENT_ID/exec";
-    const ENABLE_WRITEBACK = true; // flip to false to disable sending
+    // Your Apps Script Web App URL (you gave me this)
+    const GAS_ENDPOINT = "https://script.google.com/macros/s/AKfycby_OEW2WZezbI5mzeP-BpAzKD5gBD0vsJBNuzW7qqg-Ua8r6Iimf5FQWadzTKMqpdfM/exec";
+    const ENABLE_WRITEBACK = true;
 
     // ====== Utils ======
     const tryBuildCsvUrl = (htmlUrl)=>{
@@ -269,7 +269,7 @@
       };
 
       async function sendLikeToSheet(item){
-        if(!ENABLE_WRITEBACK || !GAS_ENDPOINT || GAS_ENDPOINT.includes("REPLACE_WITH")) return;
+        if(!ENABLE_WRITEBACK || !GAS_ENDPOINT) return;
         const payload={
           action:"like",
           timestamp:new Date().toISOString(),
