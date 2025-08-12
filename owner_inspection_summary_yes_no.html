@@ -5,56 +5,45 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Owner Inspection — Category Summary (Yes/No + Photos)</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111827'/%3E%3Cpath fill='%23FFD166' d='M14 42h36v6H14zM18 16h28a6 6 0 016 6v14H12V22a6 6 0 016-6z'/%3E%3Ccircle cx='22' cy='25' r='3' fill='%2306D6A0'/%3E%3Ccircle cx='32' cy='25' r='3' fill='%23FFD166'/%3E%3Ccircle cx='42' cy='25' r='3' fill='%23EF476F'/%3E%3C/svg%3E"/>
 <style>
-:root{
-  --bg:#ffffff; --ink:#111827; --muted:#6B7280; --line:#E5E7EB; --good:#065F46; --bad:#991B1B; --brand:#1F2937;
-  --card:#ffffff; --chip:#F3F4F6;
-}
-*{box-sizing:border-box} html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto}
-.wrap{max-width:1200px;margin:0 auto;padding:20px 20px 80px}
-.header{display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:10px 0;z-index:10}
-.h-left{display:flex;align-items:baseline;gap:12px}
-.h-title{font-weight:900;font-size:18px;color:var(--brand)}
-.h-sub{color:var(--muted);font-size:12px}
-.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-select{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px}
-.btn{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--brand);cursor:pointer}
-.status{font-size:12px;color:var(--muted)}
-.table-wrap{margin-top:16px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
-table{width:100%;border-collapse:collapse;font-size:13px}
-thead th{background:#F9FAFB;color:#111827;text-align:left;padding:10px;border-bottom:1px solid var(--line);font-weight:700}
-tbody td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
-tbody tr:last-child td{border-bottom:0}
-.badge{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--chip);border:1px solid var(--line);font-size:11px}
-.badge.yes{background:#ECFDF5;border-color:#A7F3D0;color:var(--good)}
-.badge.no{background:#FEF2F2;border-color:#FECACA;color:var(--bad)}
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
-.card h3{margin:0 0 8px 0;font-size:14px}
-.small{font-size:12px;color:var(--muted)}
-.gallery{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.ph{margin:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;position:relative}
-.ph img,.ph iframe{width:100%;height:160px;object-fit:cover;display:block;border:0}
-.ph figcaption{font-size:11px;color:#6B7280;padding:6px 8px;display:flex;justify-content:space-between;gap:6px}
-.cap-left{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cap-right{color:#374151;white-space:nowrap}
-.err{color:#991B1B}
-.loading{opacity:0.7}
+  body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; margin: 0; color: #111827; background: #fff; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 20px 20px 80px; }
+  .header { display:flex; align-items:center; justify-content:space-between; gap:16px; position:sticky; top:0; background:#fff; border-bottom:1px solid #E5E7EB; padding:10px 0; z-index:10 }
+  .h-title { font-weight: 900; font-size: 18px; color: #1F2937; }
+  .h-sub { color: #6B7280; font-size: 12px; }
+  .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+  select, button { border:1px solid #E5E7EB; border-radius:8px; padding:8px 10px; font-size:12px; background:#fff; color:#1F2937; }
+  .status { font-size:12px; color:#6B7280 }
+  .err { color: #991B1B; }
+  .table-wrap { margin-top:16px; border:1px solid #E5E7EB; border-radius:12px; overflow:hidden; background:#fff }
+  table { width:100%; border-collapse:collapse; font-size:13px }
+  thead th { background:#F9FAFB; color:#111827; text-align:left; padding:10px; border-bottom:1px solid #E5E7EB; font-weight:700 }
+  tbody td { padding:10px; border-bottom:1px solid #E5E7EB; vertical-align:top }
+  tbody tr:last-child td { border-bottom:0 }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; background:#F3F4F6; border:1px solid #E5E7EB; font-size:11px }
+  .badge.yes { background:#ECFDF5; border-color:#A7F3D0; color:#065F46 }
+  .badge.no { background:#FEF2F2; border-color:#FECACA; color:#991B1B }
+  .card { background:#fff; border:1px solid #E5E7EB; border-radius:12px; padding:12px; margin-top:16px }
+  .gallery { display:grid; grid-template-columns:repeat(4,1fr); gap:8px }
+  .ph { margin:0; border:1px solid #E5E7EB; border-radius:10px; overflow:hidden; background:#fff; position:relative }
+  .ph img, .ph iframe { width:100%; height:160px; object-fit:cover; display:block; border:0 }
+  .small { font-size:12px; color:#6B7280 }
+  .debug { font-size:12px; color:#6B7280; margin-top:6px }
 </style>
 </head>
 <body>
   <div class="wrap">
     <div class="header">
-      <div class="h-left">
+      <div>
         <div class="h-title">Owner Inspection — Category Summary</div>
-        <div class="h-sub small" id="summaryDate"></div>
+        <div class="h-sub" id="summaryDate"></div>
+        <div class="debug" id="debugMap"></div>
       </div>
       <div class="controls">
         <select id="year" title="Year"></select>
         <select id="month" title="Month"></select>
-        <button id="applyYM" class="btn">Apply</button>
+        <button id="applyYM">Apply</button>
+        <button id="showAll">Show All Data</button>
         <span id="loadStatus" class="status"></span>
       </div>
     </div>
@@ -77,243 +66,321 @@ tbody tr:last-child td{border-bottom:0}
     </div>
 
     <section id="photos" class="card">
-      <h3>All Photos (Selected Year/Month)</h3>
+      <h3>All Photos (Selection)</h3>
       <div id="allPhotos" class="gallery"></div>
       <div class="small">Photos are embedded from the comment or photo link when available.</div>
     </section>
   </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-<script>
-const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTlbdTFUi--YkOJkuO974DuxPNGcxXWIowUzUrSzuTqwPJGsD9ybHJGZqsZuDt2bZ9-FiGyeg77bNXV/pub?gid=2061234818&single=true&output=csv";
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script>
+    const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTlbdTFUi--YkOJkuO974DuxPNGcxXWIowUzUrSzuTqwPJGsD9ybHJGZqsZuDt2bZ9-FiGyeg77bNXV/pub?gid=2061234818&single=true&output=csv";
 
-// Header aliases to detect columns
-const ALIASES = {
-  year: ["year","año","ano"],
-  month: ["month","mes"],
-  category: ["category","section","area","room","zona","seccion","sección","habitacion","habitación"],
-  status: ["status","answer","respuesta","resultado","estado","pass/fail","pass fail","ok?","pass","fail","yes/no","yes no","check"],
-  comment: ["comment","comments","notes","note","observations","observaciones","comentario","comentarios"],
-  photo: ["photo","photo url","image","image url","foto","picture","photo link","evidence","evidencia","imagen","media","archivo"]
-};
+    const ALIASES = {
+      year: ["year","año","ano"],
+      month: ["month","mes"],
+      category: ["category","section","area","room","zona","seccion","sección","habitacion","habitación"],
+      status: ["status","answer","respuesta","resultado","estado","pass/fail","pass fail","ok?","pass","fail","yes/no","yes no","check"],
+      comment: ["comment","comments","notes","note","observations","observaciones","comentario","comentarios"],
+      photo: ["photo","photo url","image","image url","foto","picture","photo link","evidence","evidencia","imagen","media","archivo"],
+      dateLikeHeaders: ["date","timestamp","inspection date","fecha","fecha/hora","datetime","time","created","submitted at"]
+    };
 
-// Normalize helpers
-const norm = s => String(s ?? "").trim();
-const slug = s => norm(s).toLowerCase();
+    const statusEl = document.getElementById("loadStatus");
+    const yearSel = document.getElementById("year");
+    const monthSel = document.getElementById("month");
+    const debugMapEl = document.getElementById("debugMap");
 
-// Find matching column name in a row object using aliases
-function getField(row, keys){
-  // exact case-insensitive key match
-  for(const k of Object.keys(row)){
-    const sk = slug(k);
-    for(const alias of keys){
-      if(sk === slug(alias)) return row[k];
-    }
-  }
-  // contains match (e.g., "Status (Yes/No)")
-  for(const k of Object.keys(row)){
-    const sk = slug(k);
-    for(const alias of keys){
-      if(sk.includes(slug(alias))) return row[k];
-    }
-  }
-  return undefined;
-}
+    const norm = s => String(s ?? "").trim();
+    const slug = s => norm(s).toLowerCase();
 
-function parseMonthValue(v){
-  const s = slug(v);
-  if(!s) return null;
-  const months = ["january","february","march","april","may","june","july","august","september","october","november","december"];
-  const i = months.findIndex(m => s.startsWith(m.slice(0,3)));
-  if(i>=0) return i+1;
-  const n = parseInt(s, 10);
-  if(Number.isFinite(n) && n>=1 && n<=12) return n;
-  return null;
-}
-
-function yesNoOther(value){
-  const s = slug(value);
-  if(!s) return "other";
-  if(["yes","si","sí","ok","pass","clear","correcto","good"].some(w=>s.includes(w))) return "yes";
-  if(["no","fail","issue","bad","incorrecto","problem"].some(w=>s.includes(w))) return "no";
-  return "other";
-}
-
-function extractUrls(text){
-  const s = String(text||"");
-  const m = s.match(/https?:\/\/[^\s)]+/g);
-  return m || [];
-}
-
-function drivePreview(url){
-  try{
-    const u = new URL(url);
-    if(!u.hostname.includes("drive.google.com")) return null;
-    const m = url.match(/\/file\/d\/([^/]+)\//);
-    let id = m ? m[1] : null;
-    if(!id) id = u.searchParams.get("id");
-    return id ? `https://drive.google.com/file/d/${id}/preview` : null;
-  }catch(e){ return null; }
-}
-
-function renderImageOrLink(url){
-  const container = document.createElement("figure");
-  container.className = "ph";
-  const img = document.createElement("img");
-  img.loading = "lazy"; img.referrerPolicy = "no-referrer"; img.src = url;
-  img.onerror = ()=>{
-    const drive = drivePreview(url);
-    if(drive){
-      const ifr = document.createElement("iframe"); ifr.loading = "lazy"; ifr.src = drive; container.appendChild(ifr); img.remove();
-    } else {
-      const a = document.createElement("a"); a.href=url; a.target="_blank"; a.textContent="Open"; container.appendChild(a); img.remove();
-    }
-  };
-  container.appendChild(img);
-  return container;
-}
-
-let RAW = [];
-function loadCSV(){
-  const statusEl = document.getElementById("loadStatus");
-  statusEl.textContent = "Loading…";
-  Papa.parse(CSV_URL, {
-    download: true,
-    header: true,
-    skipEmptyLines: "greedy",
-    complete: (res)=>{
-      RAW = res.data || [];
-      statusEl.textContent = `Loaded ${RAW.length} rows.`;
-      initUI();
-    },
-    error: (err)=>{
-      statusEl.textContent = "Failed to load CSV: " + (err && err.message ? err.message : String(err));
-      statusEl.classList.add("err");
-    }
-  });
-}
-
-function initUI(){
-  // Build Year/Month lists from data if present
-  const years = new Set();
-  const monthsByYear = {};
-  RAW.forEach(row=>{
-    const Y = getField(row, ALIASES.year);
-    const M = getField(row, ALIASES.month);
-    const y = parseInt(Y,10);
-    const m = parseMonthValue(M);
-    if(y && m){
-      years.add(y);
-      if(!monthsByYear[y]) monthsByYear[y] = new Set();
-      monthsByYear[y].add(m);
-    }
-  });
-  const yearSel = document.getElementById("year");
-  const monthSel = document.getElementById("month");
-  yearSel.innerHTML = "";
-  Array.from(years).sort((a,b)=>a-b).forEach(y=>{
-    const o=document.createElement("option"); o.value=y; o.textContent=y; yearSel.appendChild(o);
-  });
-  const latestY = Array.from(years).sort((a,b)=>a-b).slice(-1)[0];
-  if(latestY){ yearSel.value = latestY; }
-
-  function fillMonths(y){
-    monthSel.innerHTML = "";
-    const months = monthsByYear[y] ? Array.from(monthsByYear[y]).sort((a,b)=>a-b) : [];
-    months.forEach(m=>{
-      const name = new Date(2000,m-1,1).toLocaleString(undefined,{month:"long"});
-      const o=document.createElement("option"); o.value=m; o.textContent=name; monthSel.appendChild(o);
-    });
-    if(months.length){ monthSel.value = months[months.length-1]; }
-  }
-  if(latestY){ fillMonths(latestY); }
-
-  document.getElementById("applyYM").addEventListener("click", applyYearMonth);
-  applyYearMonth();
-}
-
-function applyYearMonth(){
-  const y = parseInt(document.getElementById("year").value, 10);
-  const m = parseInt(document.getElementById("month").value, 10);
-  const monthName = isFinite(m) ? new Date(2000,m-1,1).toLocaleString(undefined,{month:"long"}) : "";
-  document.getElementById("summaryDate").textContent = (y && m) ? `${monthName} ${y}` : "";
-
-  const rows = RAW.filter(row=>{
-    const Y = parseInt(getField(row, ALIASES.year),10);
-    const M = parseMonthValue(getField(row, ALIASES.month));
-    return (Y===y && M===m);
-  });
-
-  // Group by category & summarize Yes/No/Other
-  const perCat = {};
-  const allPhotos = [];
-  rows.forEach(row=>{
-    const cat = norm(getField(row, ALIASES.category) || "Other");
-    const status = yesNoOther(getField(row, ALIASES.status));
-    const comment = getField(row, ALIASES.comment) || "";
-    const photoCol = getField(row, ALIASES.photo);
-
-    if(!perCat[cat]) perCat[cat] = {yes:0,no:0,other:0,comments:[]};
-    perCat[cat][status] = (perCat[cat][status]||0) + 1;
-
-    // Try to extract photo links
-    const urls = [];
-    if(photoCol) urls.push(photoCol);
-    urls.push(...extractUrls(comment));
-    const uniqueUrls = Array.from(new Set(urls.filter(Boolean)));
-
-    // store one or two samples per category for the "Sample Comments"
-    if(comment || uniqueUrls.length){
-      perCat[cat].comments.push({comment, urls: uniqueUrls.slice(0,3)});
+    // Try to get a field via alias; returns raw value
+    function getField(row, names) {
+      const keys = Object.keys(row);
+      for (const k of keys) {
+        const sk = slug(k);
+        for (const alias of names) {
+          if (sk === slug(alias)) return row[k];
+        }
+      }
+      for (const k of keys) {
+        const sk = slug(k);
+        for (const alias of names) {
+          if (sk.includes(slug(alias))) return row[k];
+        }
+      }
+      return undefined;
     }
 
-    // collect all photos for gallery
-    uniqueUrls.forEach(u=> allPhotos.push({cat, url: u}));
-  });
+    function parseMonthValue(v) {
+      const s = slug(v);
+      if (!s) return null;
+      const months = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+      const i = months.findIndex(m => s.startsWith(m.slice(0,3)));
+      if (i>=0) return i+1;
+      const n = parseInt(s, 10);
+      if (Number.isFinite(n) && n>=1 && n<=12) return n;
+      return null;
+    }
 
-  // Render summary table
-  const tbody = document.querySelector("#summaryTable tbody");
-  tbody.innerHTML = "";
-  Object.keys(perCat).sort().forEach(cat=>{
-    const s = perCat[cat];
-    const total = (s.yes||0)+(s.no||0)+(s.other||0);
-    const yesPct = total ? Math.round((s.yes/total)*100) : 0;
+    function datePartsFromAny(v) {
+      const d = new Date(v);
+      if (!isNaN(d)) return { y: d.getFullYear(), m: d.getMonth()+1 };
+      const s = norm(v);
+      const m1 = s.match(/(\d{4})[-\/](\d{1,2})/);
+      if (m1) return { y: +m1[1], m: +m1[2] };
+      const m2 = s.match(/([A-Za-z]{3,})\s+(\d{4})/);
+      if (m2) {
+        const mm = parseMonthValue(m2[1]) || 1;
+        return { y: +m2[2], m: mm };
+      }
+      return { y:null, m:null };
+    }
 
-    const tr = document.createElement("tr");
-    const tdCat = document.createElement("td"); tdCat.textContent = cat;
-    const tdYes = document.createElement("td"); tdYes.innerHTML = `<span class="badge yes">${s.yes||0}</span>`;
-    const tdNo  = document.createElement("td"); tdNo.innerHTML  = `<span class="badge no">${s.no||0}</span>`;
-    const tdOth = document.createElement("td"); tdOth.textContent = s.other||0;
-    const tdTot = document.createElement("td"); tdTot.textContent = total;
-    const tdPct = document.createElement("td"); tdPct.textContent = yesPct + "%";
+    function findAnyDateInRow(row) {
+      for (const k of Object.keys(row)) {
+        const v = row[k];
+        const d = datePartsFromAny(v);
+        if (d.y && d.m) return d;
+      }
+      return { y:null, m:null };
+    }
 
-    const tdComm = document.createElement("td");
-    const samples = s.comments.slice(0,2);
-    samples.forEach(sample=>{
-      const div = document.createElement("div");
-      div.className = "small";
-      if(sample.comment){ div.textContent = sample.comment; }
-      // embed images if any
-      sample.urls.forEach(url => {
-        const fig = renderImageOrLink(url);
-        tdComm.appendChild(fig);
+    function yesNoOther(value) {
+      const s = slug(value);
+      if (!s) return "other";
+      if (["yes","si","sí","ok","pass","clear","correcto","good","right"].some(w => s.includes(w))) return "yes";
+      if (["no","fail","issue","bad","incorrecto","problem","problems","needs attention"].some(w => s.includes(w))) return "no";
+      return "other";
+    }
+
+    function extractUrls(text) {
+      const s = String(text||"");
+      const m = s.match(/https?:\/\/[^\s)]+/g);
+      return m || [];
+    }
+
+    function drivePreview(url) {
+      try {
+        const u = new URL(url);
+        if (!u.hostname.includes("drive.google.com")) return null;
+        const m = url.match(/\/file\/d\/([^/]+)\//);
+        let id = m ? m[1] : null;
+        if (!id) id = u.searchParams.get("id");
+        return id ? `https://drive.google.com/file/d/${id}/preview` : null;
+      } catch(e) { return null; }
+    }
+
+    function renderImageOrLink(url) {
+      const container = document.createElement("figure");
+      container.className = "ph";
+      const img = document.createElement("img");
+      img.loading = "lazy"; img.referrerPolicy = "no-referrer"; img.src = url;
+      img.onerror = () => {
+        const drive = drivePreview(url);
+        if (drive) {
+          const ifr = document.createElement("iframe"); ifr.loading = "lazy"; ifr.src = drive; container.appendChild(ifr); img.remove();
+        } else {
+          const a = document.createElement("a"); a.href = url; a.target = "_blank"; a.textContent = "Open"; container.appendChild(a); img.remove();
+        }
+      };
+      container.appendChild(img);
+      return container;
+    }
+
+    let RAW = [];
+    let DETECT = { year:false, month:false, category:false, status:false, comment:false, photo:false, dateFallback:false };
+
+    function loadCSV() {
+      statusEl.textContent = "Loading…";
+      Papa.parse(CSV_URL, {
+        download: true,
+        header: true,
+        skipEmptyLines: "greedy",
+        complete: (res) => {
+          RAW = res.data || [];
+          statusEl.textContent = `Loaded ${RAW.length} rows.`;
+          initUI();
+        },
+        error: (err) => {
+          statusEl.textContent = "Failed to load CSV: " + (err && err.message ? err.message : String(err));
+          statusEl.classList.add("err");
+        }
       });
-      tdComm.appendChild(div);
-    });
+    }
 
-    [tdCat, tdYes, tdNo, tdOth, tdTot, tdPct, tdComm].forEach(td=>tr.appendChild(td));
-    tbody.appendChild(tr);
-  });
+    function initUI() {
+      // Detect columns
+      const sample = RAW[0] || {};
+      DETECT.year    = getField(sample, ALIASES.year)    !== undefined;
+      DETECT.month   = getField(sample, ALIASES.month)   !== undefined;
+      DETECT.category= getField(sample, ALIASES.category)!== undefined;
+      DETECT.status  = getField(sample, ALIASES.status)  !== undefined;
+      DETECT.comment = getField(sample, ALIASES.comment) !== undefined;
+      DETECT.photo   = getField(sample, ALIASES.photo)   !== undefined;
 
-  // Render all photos
-  const gallery = document.getElementById("allPhotos");
-  gallery.innerHTML = "";
-  allPhotos.slice(0,200).forEach(p=>{
-    gallery.appendChild(renderImageOrLink(p.url));
-  });
-}
+      // Build YM index with fallback
+      const years = new Set();
+      const monthsByYear = {};
+      RAW.forEach(row => {
+        let y=null, m=null;
+        if (DETECT.year)  y = parseInt(getField(row, ALIASES.year),10) || null;
+        if (DETECT.month) m = parseMonthValue(getField(row, ALIASES.month));
 
-loadCSV();
-</script>
+        if (!y || !m) {
+          // Try any date-like field from all columns (or specifically common date headers)
+          const directDate = getField(row, ALIASES.dateLikeHeaders);
+          let d = {y:null,m:null};
+          if (directDate) d = datePartsFromAny(directDate);
+          if (!d.y || !d.m) d = findAnyDateInRow(row);
+          if (d.y && d.m) { y = y || d.y; m = m || d.m; DETECT.dateFallback = true; }
+        }
+
+        if (y && m) {
+          years.add(y);
+          if (!monthsByYear[y]) monthsByYear[y] = new Set();
+          monthsByYear[y].add(m);
+        }
+      });
+
+      // Populate controls
+      yearSel.innerHTML = "";
+      const sortedYears = Array.from(years).sort((a,b)=>a-b);
+      sortedYears.forEach(y => {
+        const o = document.createElement("option");
+        o.value = y; o.textContent = y; yearSel.appendChild(o);
+      });
+      const latestY = sortedYears.slice(-1)[0];
+      if (latestY) yearSel.value = latestY;
+
+      function fillMonths(y) {
+        monthSel.innerHTML = "";
+        const months = monthsByYear[y] ? Array.from(monthsByYear[y]).sort((a,b)=>a-b) : [];
+        months.forEach(m => {
+          const name = new Date(2000,m-1,1).toLocaleString(undefined,{month:"long"});
+          const o = document.createElement("option"); o.value = m; o.textContent = name; monthSel.appendChild(o);
+        });
+        if (months.length) monthSel.value = months[months.length-1];
+      }
+      if (latestY) fillMonths(latestY);
+
+      // Debug mapping line
+      debugMapEl.textContent = `Detected -> Year: ${DETECT.year ? "✓":"×"}, Month: ${DETECT.month ? "✓":"×"}, Category: ${DETECT.category ? "✓":"×"}, Status: ${DETECT.status ? "✓":"×"}, Comment: ${DETECT.comment ? "✓":"×"}, Photo: ${DETECT.photo ? "✓":"×"}, DateFallback: ${DETECT.dateFallback ? "✓":"×"}`;
+
+      document.getElementById("applyYM").addEventListener("click", applyYearMonth);
+      document.getElementById("showAll").addEventListener("click", () => renderSummary(RAW));
+
+      // If we found Y/M, apply the latest; else show all data
+      if (sortedYears.length) {
+        applyYearMonth();
+      } else {
+        renderSummary(RAW);
+      }
+    }
+
+    function applyYearMonth() {
+      const y = parseInt(yearSel.value,10);
+      const m = parseInt(monthSel.value,10);
+      const monthName = isFinite(m) ? new Date(2000,m-1,1).toLocaleString(undefined,{month:"long"}) : "";
+      document.getElementById("summaryDate").textContent = (y && m) ? `${monthName} ${y}` : "";
+
+      const filtered = RAW.filter(row => {
+        let yRow=null, mRow=null;
+        if (DETECT.year)  yRow = parseInt(getField(row, ALIASES.year),10) || null;
+        if (DETECT.month) mRow = parseMonthValue(getField(row, ALIASES.month));
+
+        if (!yRow || !mRow) {
+          const directDate = getField(row, ALIASES.dateLikeHeaders);
+          let d = {y:null,m:null};
+          if (directDate) d = datePartsFromAny(directDate);
+          if (!d.y || !d.m) d = findAnyDateInRow(row);
+          if (d.y && d.m) { yRow = yRow || d.y; mRow = mRow || d.m; }
+        }
+        return (yRow===y && mRow===m);
+      });
+
+      renderSummary(filtered);
+    }
+
+    function renderSummary(rows) {
+      const tbody = document.querySelector("#summaryTable tbody");
+      const gallery = document.getElementById("allPhotos");
+      tbody.innerHTML = "";
+      gallery.innerHTML = "";
+
+      if (!rows.length) return;
+
+      const perCat = {};
+      const allPhotos = [];
+
+      rows.forEach(row => {
+        const cat = norm(getField(row, ALIASES.category) || "Other");
+        const status = yesNoOther(getField(row, ALIASES.status));
+        const comment = getField(row, ALIASES.comment) || "";
+        const photoCol = getField(row, ALIASES.photo);
+
+        if (!perCat[cat]) perCat[cat] = { yes:0, no:0, other:0, comments:[] };
+        perCat[cat][status] = (perCat[cat][status]||0) + 1;
+
+        // Extract photo links
+        const urls = [];
+        if (photoCol) urls.push(photoCol);
+        urls.push(...extractUrls(comment));
+        const unique = Array.from(new Set(urls.filter(Boolean)));
+
+        if (comment || unique.length) {
+          perCat[cat].comments.push({ comment, urls: unique.slice(0,3) });
+        }
+        unique.forEach(u => allPhotos.push({ cat, url: u }));
+      });
+
+      Object.keys(perCat).sort().forEach(cat => {
+        const s = perCat[cat];
+        const total = (s.yes||0) + (s.no||0) + (s.other||0);
+        const yesPct = total ? Math.round((s.yes/total)*100) : 0;
+
+        const tr = document.createElement("tr");
+        const tdCat = document.createElement("td"); tdCat.textContent = cat;
+        const tdYes = document.createElement("td"); tdYes.innerHTML = `<span class="badge yes">${s.yes||0}</span>`;
+        const tdNo  = document.createElement("td"); tdNo .innerHTML = `<span class="badge no">${s.no||0}</span>`;
+        const tdOth = document.createElement("td"); tdOth.textContent = s.other||0;
+        const tdTot = document.createElement("td"); tdTot.textContent = total;
+        const tdPct = document.createElement("td"); tdPct.textContent = yesPct + "%";
+
+        const tdComm = document.createElement("td");
+        s.comments.slice(0,2).forEach(sample => {
+          const div = document.createElement("div"); div.className = "small";
+          if (sample.comment) div.textContent = sample.comment;
+          sample.urls.forEach(url => tdComm.appendChild(renderImageOrLink(url)));
+        });
+
+        [tdCat, tdYes, tdNo, tdOth, tdTot, tdPct, tdComm].forEach(td => tr.appendChild(td));
+        tbody.appendChild(tr);
+      });
+
+      // Render all photos
+      allPhotos.slice(0,200).forEach(p => gallery.appendChild(renderImageOrLink(p.url)));
+    }
+
+    // date helper for applyYearMonth
+    function datePartsFromAny(v) {
+      const d = new Date(v);
+      if (!isNaN(d)) return { y: d.getFullYear(), m: d.getMonth()+1 };
+      const s = norm(v);
+      const m1 = s.match(/(\d{4})[-\/](\d{1,2})/);
+      if (m1) return { y: +m1[1], m: +m1[2] };
+      const m2 = s.match(/([A-Za-z]{3,})\s+(\d{4})/);
+      if (m2) {
+        const mm = parseMonthValue(m2[1]) || 1;
+        return { y: +m2[2], m: mm };
+      }
+      return { y:null, m:null };
+    }
+
+    document.getElementById("applyYM").addEventListener("click", applyYearMonth);
+    document.getElementById("showAll").addEventListener("click", () => renderSummary(RAW));
+
+    loadCSV();
+  </script>
 </body>
 </html>
