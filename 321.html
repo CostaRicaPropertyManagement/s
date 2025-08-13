@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Owner Inspection — Live</title>
 
-<!-- PapaParse (kept simple: no SRI, no crossorigin) -->
+<!-- PapaParse (simple include; no worker mode in parser options) -->
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" defer></script>
 
 <link rel="preconnect" href="https://docs.google.com">
@@ -63,7 +63,7 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #256
 .skip-link{position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden}
 .skip-link:focus{position:static;width:auto;height:auto;padding:8px;border:1px solid var(--line);background:#fff;border-radius:8px}
 
-/* Issues Summary styles */
+/* Issues Summary styles (bottom) */
 .issues{border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff}
 .issues h3{margin:10px 0 6px;font-size:14px}
 .issues ul{margin:0 0 8px 16px;padding:0}
@@ -100,12 +100,6 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #256
   <main id="main" role="main" tabindex="-1">
     <div id="errBox" class="small warn" role="alert" aria-live="assertive" style="margin:8px 0;"></div>
 
-    <!-- Issues Summary -->
-    <section class="section" aria-label="Issues Summary">
-      <div class="sec-title">Issues Summary</div>
-      <div id="issuesSummary" class="issues small">Loading…</div>
-    </section>
-
     <section aria-label="Section status">
       <div class="sec-title">Section status</div>
       <div id="tiles" class="tiles" aria-live="polite"></div>
@@ -114,6 +108,12 @@ button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #256
     <section class="section" aria-label="Photos">
       <div class="sec-title">Photos (Selected)</div>
       <div id="photoSections"></div>
+    </section>
+
+    <!-- Issues Summary placed at the BOTTOM -->
+    <section class="section" aria-label="Issues Summary">
+      <div class="sec-title">Issues Summary</div>
+      <div id="issuesSummary" class="issues small">Loading…</div>
     </section>
   </main>
 </div>
@@ -138,8 +138,8 @@ const COMMENT_HINTS = ['if you answered','si respondió','si respondiste','descr
 
 const FRIENDLY = {
   BR:'Bedroom', BD:'Bedroom', BA:'Bathroom',
-  KT:'Kitchen', KI:'Kitchen',         // <- KI supported
-  LR:'Living Room', LV:'Living Room', // <- LV supported
+  KT:'Kitchen', KI:'Kitchen',         // KI supported
+  LR:'Living Room', LV:'Living Room', // LV supported
   GQ:'General', LL:'Locks & Lights', LA:'Laundry', DR:'Dining Room', EX:'Exterior',
   ALL:'All Checks'
 };
@@ -253,7 +253,7 @@ async function loadCsv(){
         header: true,
         dynamicTyping: false,
         skipEmptyLines: 'greedy',
-        // IMPORTANT: do not use worker:true with transform functions
+        // IMPORTANT: no worker:true when using transform callbacks
         transformHeader: h => fixMojibake(String(h||'').trim()),
         transform: v => fixMojibake(v),
         complete: (results)=>{
@@ -271,7 +271,6 @@ async function loadCsv(){
         }
       });
     }catch(err){
-      // Fallback: very naive CSV (last resort)
       console.error(err);
       setError('PapaParse error, using fallback parser (data may be less accurate).');
       const lines = cleaned.split('\n').filter(Boolean);
@@ -529,9 +528,11 @@ function applySelection(){
   const agg = aggregate(monthRows);
   const label = monthRows.length ? `${monthName(m)} ${y}${(!iSel.classList.contains('hidden') && iSel.value!=='all') ? ' — '+iSel.options[iSel.selectedIndex].text : ''}` : 'No data';
   document.getElementById('summaryDate').textContent = label;
-  renderIssuesSummary(agg);
+
+  // Render in on-page order: tiles, photos, ISSUES SUMMARY (bottom).
   renderTiles(agg);
   renderPhotos(agg);
+  renderIssuesSummary(agg);
 }
 
 /* ====== Index & title address ====== */
@@ -604,6 +605,7 @@ async function loadAndRender(){
       document.getElementById('summaryDate').textContent = 'No dated rows';
       document.getElementById('tiles').innerHTML = '<div class="small">No timestamped responses found.</div>';
       document.getElementById('photoSections').innerHTML = '';
+      document.getElementById('issuesSummary').textContent = 'No issues found — all checks passed.';
     }
   }catch(err){
     console.error(err);
@@ -611,6 +613,7 @@ async function loadAndRender(){
     document.getElementById('summaryDate').textContent = 'Failed to load';
     document.getElementById('tiles').innerHTML = '<div class="small">Could not load data.</div>';
     document.getElementById('photoSections').innerHTML = '';
+    document.getElementById('issuesSummary').textContent = '—';
   }
 }
 
