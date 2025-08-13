@@ -15,7 +15,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-se
 .h-sub{color:var(--muted);font-size:12px}
 .controls{display:flex;flex-wrap:wrap;gap:8px}
 select,button{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px}
-.btn{background:#fff;color:var(--brand);cursor:pointer}
+.btn{background:#fff;color:#1F2937;cursor:pointer}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:14px}
 .tile{display:flex;flex-direction:column;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff;text-decoration:none;color:inherit}
 .tile .name{font-weight:800;margin-top:6px;text-align:center}
@@ -35,6 +35,7 @@ select,button{border:1px solid var(--line);border-radius:8px;padding:8px 10px;fo
 .warn{color:#9B2226}
 .donut{width:72px;height:72px}
 .tile svg text{font-size:6px;font-weight:800;fill:#111827}
+.hidden{display:none}
 </style>
 </head>
 <body>
@@ -47,6 +48,7 @@ select,button{border:1px solid var(--line);border-radius:8px;padding:8px 10px;fo
     <div class="controls">
       <select id="year" title="Year"></select>
       <select id="month" title="Month"></select>
+      <select id="inspection" title="Inspection" class="hidden"></select>
       <button id="lastBtn" class="btn" title="Jump to most recent inspection">Last Inspection</button>
       <button id="applyYM" class="btn">Apply</button>
     </div>
@@ -57,7 +59,7 @@ select,button{border:1px solid var(--line);border-radius:8px;padding:8px 10px;fo
   <section id="tiles" class="tiles"></section>
 
   <section class="section">
-    <div class="sec-title">Photos (Selected Year/Month)</div>
+    <div class="sec-title">Photos (Selected)</div>
     <div id="photoSections"></div>
   </section>
 </div>
@@ -92,6 +94,7 @@ const isUrlish = (s)=>/\bhttps?:\/\/|^www\./i.test(String(s||''));
 const monthName = (m)=> new Date(2000, m-1, 1).toLocaleString(undefined,{month:'long'});
 function firstVal(row, keys){ for(const k of keys){ if(row[k]!=null && String(row[k]).trim()!=='') return row[k]; } return undefined; }
 
+/* ====== Timestamp helpers ====== */
 function parseTimestamp(row){
   const t = firstVal(row, TS_KEYS);
   if(!t) return null;
@@ -106,7 +109,6 @@ function deriveYM(row){
 /* ====== Mojibake & token normalization ====== */
 function fixMojibake(s){
   return String(s ?? '')
-    // common UTF-8→Latin-1 mojibake fixes
     .replace(/sÃ­/gi,'sí')
     .replace(/Ã¡/g,'á').replace(/Ã©/g,'é').replace(/Ã­/g,'í').replace(/Ã³/g,'ó').replace(/Ãº/g,'ú')
     .replace(/Ã±/g,'ñ')
@@ -115,15 +117,14 @@ function fixMojibake(s){
 }
 function normalizeToken(value){
   let t = fixMojibake(value).trim().toLowerCase();
-  // also collapse extra spaces
   t = t.replace(/\s+/g,' ');
-  return stripDiacritics(t);
+  return stripDiacritics(t); // e.g., "sí" -> "si"
 }
 
-/* ====== Section detection ====== */
+/* ====== Section & column type detection ====== */
 function sectionKeyFromHeader(h){
   if(!h) return null;
-  const m = String(h).match(/\[([A-Za-z0-9_]+)\]/); // allow anywhere in header
+  const m = String(h).match(/\[([A-Za-z0-9_]+)\]/);
   if(!m) return null;
   return m[1].replace(/_.*/, ''); // BR_1 -> BR
 }
@@ -134,51 +135,38 @@ function isMetaHeader(h){
 function isPhotoHeader(h){ return PHOTO_HINTS.some(hint => lower(h||'').includes(hint)); }
 function isCommentOnlyHeader(h){ return COMMENT_HINTS.some(hint => lower(h||'').includes(hint)); }
 
-/* ====== Classification (YES/SÍ/SI/SÃ­) ====== */
+/* ====== Classification (YES / SÍ / SI / YES-SÍ / YES/SÍ) ====== */
 function classifyAnswer(val){
   if(val==null) return 'ignore';
   const raw = String(val).trim();
   if(!raw) return 'ignore';
   if(isUrlish(raw)) return 'ignore';
-  const norm = normalizeToken(raw); // fixes SÃ­ → sí, strips accent → si
-  if(norm === 'yes' || norm === 'si') return 'pass'; // 'sí' becomes 'si'
-  if(norm === 'no') return 'fail';
+
+  const norm = normalizeToken(raw); // e.g., "Yes / Sí" -> "yes / si"
+  // Tokenize on any non-letter boundary, then check tokens.
+  const tokens = norm.replace(/[^a-z]+/g,' ').trim().split(/\s+/);
+
+  const hasYes = tokens.includes('yes') || tokens.includes('si'); // 'sí' -> 'si'
+  const hasNo  = tokens.includes('no');
+
+  if (hasYes) return 'pass';
+  if (hasNo)  return 'fail';
   return 'ignore';
 }
 
-/* ====== CSV pre-clean to avoid "Trailing quote..." ====== */
+/* ====== CSV pre-clean (keep quotes intact) ====== */
 function sanitizeCsvText(text){
-  // 1) normalize newlines
-  let t = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
-
-  // 2) smart quotes/apostrophes → ASCII
-  t = t
-    .replace(/[\u201C\u201D]/g,'"') // “ ”
-    .replace(/[\u2018\u2019]/g,"'"); // ‘ ’
-
-  // 3) Try to repair lines with an odd number of double-quotes by doubling stray quotes
-  const lines = t.split('\n');
-  for(let i=0;i<lines.length;i++){
-    const line = lines[i];
-    const qCount = (line.match(/"/g)||[]).length;
-    if(qCount % 2 !== 0){
-      // Heuristic: replace single unescaped " with "" inside fields
-      lines[i] = line.replace(/"(?=[^",]*($|,))/g,'""');
-    }
-  }
-  t = lines.join('\n');
-
-  return t;
+  if (text && text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
+  return text.replace(/\r\n/g,'\n').replace(/\r/g,'\n'); // normalize newlines only
 }
 
-/* ====== CSV loader (download → clean → parse) ====== */
+/* ====== CSV loader (download → minimal clean → parse) ====== */
 async function loadCsv(){
   const url = new URL(CSV_URL);
   url.searchParams.set('_ts_', Date.now());
-  const res = await fetch(url.toString(), {cache:'no-store', mode:'cors'});
+  const res = await fetch(url.toString(), { cache:'no-store', mode:'cors' });
   if(!res.ok) throw new Error(`HTTP ${res.status} fetching CSV`);
   const raw = await res.text();
-
   const cleaned = sanitizeCsvText(raw);
 
   return new Promise((resolve)=>{
@@ -186,13 +174,18 @@ async function loadCsv(){
       header: true,
       dynamicTyping: false,
       skipEmptyLines: 'greedy',
-      transformHeader: h => (h||'').trim(),
+      transformHeader: h => fixMojibake(String(h||'').trim()),
       transform: v => fixMojibake(v),
       complete: (results)=>{
-        // Do not hard-fail on warnings; surface first warning text only
-        if(results.errors && results.errors.length){
-          const first = results.errors[0];
+        const errors = (results.errors || []).filter(e =>
+          !(String(e.message||'').includes('Trailing quote on quoted field is malformed') &&
+            (e.row === 0 || e.row == null))
+        );
+        if (errors.length){
+          const first = errors[0];
           setError(`CSV parse warnings: ${first.message} @ row ${first.row ?? '?'}`);
+        } else {
+          setError('');
         }
         resolve(results.data || []);
       }
@@ -317,12 +310,14 @@ function renderPhotos(agg){
   });
 }
 
-/* ====== Year/Month controls ====== */
+/* ====== Year/Month + Inspection controls ====== */
 function monthLabel(m){ return monthName(m); }
 
 function populateSelectors(){
   const ySel=document.getElementById('year');
   const mSel=document.getElementById('month');
+  const iSel=document.getElementById('inspection');
+
   ySel.innerHTML='';
   YEARS.forEach(y=>{ const opt=document.createElement('option'); opt.value=y; opt.textContent=y; ySel.appendChild(opt); });
   if(YEARS.length) ySel.value = YEARS[YEARS.length-1];
@@ -336,27 +331,68 @@ function populateSelectors(){
       mSel.appendChild(opt);
     });
     if(months.length) mSel.value = months[months.length-1];
+    fillInspections(); // refresh inspection list when month changes
   }
+
+  function fillInspections(){
+    const y = parseInt(ySel.value,10);
+    const m = parseInt(mSel.value,10);
+    const monthRows = RAW_ROWS.filter(r=>{
+      const d = deriveYM(r); return d.year===y && d.month===m;
+    }).sort((a,b)=> (parseTimestamp(b)?.getTime()||0) - (parseTimestamp(a)?.getTime()||0));
+
+    iSel.innerHTML='';
+    if(monthRows.length <= 1){
+      iSel.classList.add('hidden');
+      return;
+    }
+    iSel.classList.remove('hidden');
+    // Option 0: All in month
+    const optAll = document.createElement('option'); optAll.value='all'; optAll.textContent='All in month'; iSel.appendChild(optAll);
+    // Newest first: Inspection 1 (Newest), 2, ...
+    monthRows.forEach((row, idx)=>{
+      const d = parseTimestamp(row);
+      const label = idx===0 ? `Inspection ${idx+1} (Newest)` : `Inspection ${idx+1}`;
+      const opt = document.createElement('option');
+      opt.value = String(idx);
+      opt.textContent = label + (d? ` — ${d.toLocaleString()}` : '');
+      iSel.appendChild(opt);
+    });
+    iSel.value = 'all';
+  }
+
   fillMonths(ySel.value);
-  ySel.addEventListener('change', ()=>{ fillMonths(ySel.value); applyYearMonth(); });
-  mSel.addEventListener('change', applyYearMonth);
+  ySel.addEventListener('change', ()=>{ fillMonths(ySel.value); applySelection(); });
+  mSel.addEventListener('change', ()=>{ fillInspections(); applySelection(); });
+  iSel.addEventListener('change', applySelection);
 }
 
-function applyYearMonth(){
+function applySelection(){
   const y = parseInt(document.getElementById('year').value,10);
   const m = parseInt(document.getElementById('month').value,10);
-  const rows = RAW_ROWS.filter(r=>{
+  const iSel = document.getElementById('inspection');
+
+  let monthRows = RAW_ROWS.filter(r=>{
     const d = deriveYM(r);
     return d.year===y && d.month===m;
-  });
-  const agg = aggregate(rows);
-  const label = rows.length ? `${monthLabel(m)} ${y}` : 'No data';
+  }).sort((a,b)=> (parseTimestamp(b)?.getTime()||0) - (parseTimestamp(a)?.getTime()||0));
+
+  // If inspection selector visible and a single inspection chosen, reduce to that row
+  if(!iSel.classList.contains('hidden') && iSel.value !== 'all'){
+    const idx = parseInt(iSel.value,10);
+    if(!Number.isNaN(idx) && monthRows[idx]) monthRows = [monthRows[idx]];
+  }
+
+  const agg = aggregate(monthRows);
+  const label = monthRows.length ? `${monthLabel(m)} ${y}${(!iSel.classList.contains('hidden') && iSel.value!=='all') ? ' — '+iSel.options[iSel.selectedIndex].text : ''}` : 'No data';
   document.getElementById('summaryDate').textContent = label;
   renderTiles(agg);
   renderPhotos(agg);
 }
 
-/* Build Year/Month index + Last Inspection */
+/* Maintain compatibility with the old "Apply" button and "Last Inspection" */
+function applyYearMonth(){ applySelection(); }
+
 function buildIndex(rows){
   const years = new Set();
   const monthsByYear = {};
@@ -393,7 +429,10 @@ function jumpToLast(){
     opt.value=m; opt.textContent=monthLabel(m); mSel.appendChild(opt);
   });
   mSel.value = String(LATEST_YM.month);
-  applyYearMonth();
+  // refresh inspection list for that month
+  const iSel=document.getElementById('inspection');
+  iSel.classList.add('hidden');
+  applySelection();
 }
 
 /* ====== Boot ====== */
@@ -402,9 +441,17 @@ async function loadAndRender(){
   document.getElementById('summaryDate').textContent = 'Loading…';
   try{
     RAW_ROWS = await loadCsv();
+    if(!RAW_ROWS.length){
+      setError('No data rows found in CSV.');
+    }
     buildIndex(RAW_ROWS);
     populateSelectors();
-    applyYearMonth();
+    if (YEARS.length){
+      applySelection();
+    } else {
+      document.getElementById('summaryDate').textContent = 'No dated rows';
+      document.getElementById('tiles').innerHTML = '<div class="small">No timestamped responses found.</div>';
+    }
   }catch(err){
     console.error(err);
     setError(err.message);
@@ -413,7 +460,7 @@ async function loadAndRender(){
     document.getElementById('photoSections').innerHTML = '';
   }
 }
-document.getElementById('applyYM').addEventListener('click', applyYearMonth);
+document.getElementById('applyYM').addEventListener('click', applySelection);
 document.getElementById('lastBtn').addEventListener('click', jumpToLast);
 loadAndRender();
 </script>
