@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Owner Inspection — Live CSV</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Owner Inspection — Live (Google Sheets HTML)</title>
 <style>
 :root{--bg:#fff;--ink:#111827;--muted:#6B7280;--line:#E5E7EB;--ok:#287271;--bad:#9B2226;--brand:#1F2937}
 *{box-sizing:border-box}
@@ -13,11 +13,11 @@ body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-se
 .h-title{font-weight:900;font-size:18px;color:var(--brand)}
 .h-sub{color:var(--muted);font-size:12px}
 .controls{display:flex;flex-wrap:wrap;gap:8px}
-select,input,button{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px}
+select,button{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px}
 .btn{background:#fff;color:var(--brand);cursor:pointer}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-top:14px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:14px}
 .tile{display:flex;flex-direction:column;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff;text-decoration:none;color:inherit}
-.tile .name{font-weight:800;margin-top:6px;text-align:center}
+.tile .name{font-weight:800;margin-top:6px}
 .tile .pill{font-size:11px;margin-top:6px;padding:3px 7px;border-radius:999px;border:1px solid var(--line)}
 .pill.ok{background:#ECFDF5;color:#065F46;border-color:#A7F3D0}
 .pill.bad{background:#FEF2F2;color:#991B1B;border-color:#FECACA}
@@ -34,8 +34,6 @@ select,input,button{border:1px solid var(--line);border-radius:8px;padding:8px 1
 .donut{width:72px;height:72px}
 .tile svg text{font-size:6px;font-weight:800;fill:#111827}
 </style>
-<!-- Papa Parse for robust CSV parsing -->
-<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -52,7 +50,7 @@ select,input,button{border:1px solid var(--line);border-radius:8px;padding:8px 1
     </div>
   </div>
 
-  <div id="errBox" class="small" style="margin-top:8px;color:#9B2226;"></div>
+  <div id="errBox" class="small" style="margin:8px 0;color:#9B2226;"></div>
 
   <section id="tiles" class="tiles"></section>
 
@@ -63,151 +61,74 @@ select,input,button{border:1px solid var(--line);border-radius:8px;padding:8px 1
 </div>
 
 <script>
-/* === Your published CSV === */
-const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTH18JY92PQUibhQfTwhTcJZpEEuz-NrBbe4fUWAB0lSCT2tY-X9GwIVEQhr8XCHEH08EHfq3vav1Td/pub?output=csv';
+/* ====== Your published HTML link (pubhtml) ======
+   Example you shared:
+   https://docs.google.com/spreadsheets/d/e/2PACX-.../pubhtml
+   You can also include #gid=... to force a specific tab.
+*/
+const PUBHTML_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTH18JY92PQUibhQfTwhTcJZpEEuz-NrBbe4fUWAB0lSCT2tY-X9GwIVEQhr8XCHEH08EHfq3vav1Td/pubhtml';
 
-/* === State === */
-let RAW_ROWS = [];
+/* ====== State ====== */
+let RAW_ROWS = []; // array of objects (header -> value)
 let YEARS = [];
 let MONTHS_BY_YEAR = {};
 let LATEST_YM = {year: undefined, month: undefined};
 
-/* === Header detection (EN + ES) === */
-const TS_KEYS = [
-  'Timestamp','timestamp','Marca temporal','marca temporal',
-  'Fecha','fecha','Fecha y hora','fecha y hora','Datetime','Date','date'
-];
-/* Heuristics for photos */
-const PHOTO_NAME_HINTS = ['photo','foto','imagen','image','picture','pic','fotos','photograph','screenshot'];
+/* ====== Header hints (EN + ES) ====== */
+const TS_KEYS = ['Timestamp','timestamp','Marca temporal','marca temporal','Fecha','fecha','Fecha y hora','fecha y hora','Date','Datetime','date','datetime'];
+const PHOTO_HINTS = ['photo','photos','foto','fotos','imagen','imágenes','image','images'];
+const COMMENT_HINTS = ['if you answered','si respondió','si respondiste','describe','describa','coment','comment','nota','notes','observación','observaciones','por favor'];
 
-/* We will infer sections from headers like: [BR_1] - Question ... */
-const SECTION_CODE_RE = /^\s*\[([^\]]+)\]/;
+/* Section friendly names (optional) */
+const FRIENDLY = {
+  BR: 'Bedroom', BD: 'Bedroom', BA: 'Bathroom', KT: 'Kitchen', LR: 'Living Room',
+  GQ: 'General', LL: 'Locks & Lights', LA: 'Laundry', DR: 'Dining Room', EX: 'Exterior'
+};
 
-/* === UI helpers === */
-function setError(msg){ document.getElementById('errBox').textContent = msg || ''; }
-function firstDefinedIn(row, keys){
-  for(const k of keys){
-    if (k in row && row[k] != null && String(row[k]).trim() !== '') return row[k];
-  }
-  /* Fallback: look for any header that loosely matches "timestamp" or "fecha" */
-  for (const key of Object.keys(row)){
-    const lk = key.toLowerCase();
-    if ((lk.includes('timestamp') || lk.includes('marca temporal') || lk === 'fecha' || lk.includes('fecha y hora')) && String(row[key]).trim() !== ''){
-      return row[key];
-    }
-  }
-  return undefined;
+/* ====== Utils ====== */
+const setError = (msg)=>{ document.getElementById('errBox').textContent = msg || ''; };
+const toNum = (v)=>{ const n=Number(v); return Number.isFinite(n)?n:0; };
+const lower = (s)=>String(s||'').toLowerCase();
+const stripDiacritics = (s)=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+const isUrlish = (s)=>/\bhttps?:\/\/|^www\./i.test(String(s||''));
+const firstVal = (row, keys)=>{ for(const k of keys){ if(row[k]!=null && String(row[k]).trim()!=='') return row[k]; } return undefined; };
+const monthName = (m)=> new Date(2000, m-1, 1).toLocaleString(undefined,{month:'long'});
+
+/* Get base section code from header like "[BR_1] - ..." -> "BR" */
+function sectionKeyFromHeader(h){
+  const m = String(h||'').match(/^\s*\[([A-Za-z0-9_]+)\]/);
+  if(!m) return null;
+  return m[1].replace(/_.*/, ''); // base group
 }
-function getRowDate(row){
-  const t = firstDefinedIn(row, TS_KEYS);
-  const d = t ? new Date(t) : null;
-  return (d && !isNaN(d)) ? d : null;
+function isPhotoHeader(h){ return PHOTO_HINTS.some(hint => lower(h).includes(hint)); }
+function isCommentOnlyHeader(h){ return COMMENT_HINTS.some(hint => lower(h).includes(hint)); }
+
+function parseTimestamp(row){
+  const t = firstVal(row, TS_KEYS);
+  if(!t) return null;
+  const d = new Date(t);
+  return isNaN(d) ? null : d;
 }
-function deriveYearMonth(row){
-  const d = getRowDate(row);
+function deriveYM(row){
+  const d = parseTimestamp(row);
   return d ? {year:d.getFullYear(), month:d.getMonth()+1} : {year:undefined, month:undefined};
 }
-function monthName(m){ return new Date(2000, m-1, 1).toLocaleString(undefined,{month:'long'}); }
-function isUrl(v){ const s = String(v||'').trim(); return /^https?:\/\//i.test(s); }
 
-/* === Column metadata built once from headers === */
-let COL_META = []; // [{key, sectionCode, isPhoto, isAnswerCandidate}]
-function buildColMeta(headers){
-  COL_META = headers.map(h=>{
-    const key = h;
-    const isPhoto = PHOTO_NAME_HINTS.some(w => h.toLowerCase().includes(w));
-    let sectionCode = null;
-    const m = h.match(SECTION_CODE_RE);
-    if (m) sectionCode = m[1].trim(); // e.g. BR_1, GQ, LL, etc.
-    // "Answer candidate": we will scan its values for Yes/Sí/No
-    const isAnswerCandidate = !!sectionCode && !isPhoto;
-    return {key, sectionCode, isPhoto, isAnswerCandidate};
-  });
-}
-
-/* === Yes / No counting === */
 function classifyAnswer(val){
-  if (val == null) return 'ignore';
+  if(val==null) return 'ignore';
   const raw = String(val).trim();
-  if (!raw) return 'ignore';
-  if (isUrl(raw)) return 'ignore';               // links don't count
-  const lc = raw.toLowerCase();
-  if (lc === 'yes' || lc === 'sí' || lc === 'si') return 'pass';
-  if (lc === 'no') return 'fail';
-  return 'ignore';                                // comments, numbers, etc. ignored
+  if(!raw) return 'ignore';
+  if(isUrlish(raw)) return 'ignore';
+  const norm = stripDiacritics(raw).toLowerCase();
+  if(norm === 'yes' || norm === 'si') return 'pass'; // Sí/si
+  if(norm === 'no') return 'fail';
+  return 'ignore';
 }
-
-/* === Aggregate by section for selected rows === */
-function aggregateBySection(rows){
-  const agg = { sections: {}, photos: {} };
-  for (const row of rows){
-    // Count answers per section
-    for (const col of COL_META){
-      const val = row[col.key];
-      if (col.isAnswerCandidate){
-        const cls = classifyAnswer(val);
-        if (cls !== 'ignore'){
-          if (!agg.sections[col.sectionCode]) agg.sections[col.sectionCode] = {passes:0, fails:0, total:0};
-          if (cls === 'pass') agg.sections[col.sectionCode].passes++;
-          if (cls === 'fail') agg.sections[col.sectionCode].fails++;
-          agg.sections[col.sectionCode].total++;
-        }
-      }
-      // Collect photos under the right section (if header had code), else "Misc"
-      if (col.isPhoto && val){
-        const urls = String(val).split(/\s+/).filter(isUrl);
-        if (urls.length){
-          const sec = col.sectionCode || 'Misc';
-          if (!agg.photos[sec]) agg.photos[sec] = [];
-          // date string (for captions)
-          const d = getRowDate(row);
-          const ts = d ? d.toISOString() : '';
-          urls.forEach(u => agg.photos[sec].push({url:u, ts}));
-        }
-      }
-    }
-  }
-  return agg;
+function splitUrls(s){
+  if(!s) return [];
+  const parts = String(s).split(/[\s,;\n\r]+/).filter(Boolean);
+  return parts.filter(isUrlish);
 }
-
-/* === Render donut tiles === */
-function renderTiles(agg){
-  const tiles = document.getElementById('tiles');
-  tiles.innerHTML = '';
-  const secs = Object.keys(agg.sections).sort((a,b)=>String(a).localeCompare(String(b), undefined, {numeric:true}));
-  if (!secs.length){
-    tiles.innerHTML = '<div class="small">No sections detected for this period.</div>';
-    return;
-  }
-  for (const sec of secs){
-    const s = agg.sections[sec];
-    const total = s.total || 0;
-    const passes = s.passes || 0;
-    const fails = s.fails || 0;
-    const rate = total ? Math.round((passes/total)*100) : null;
-    const pill = total === 0
-      ? '<span class="pill na">No data</span>'
-      : (fails>0 ? `<span class="pill bad">${fails} issue${fails>1?'s':''}</span>` : '<span class="pill ok">Clear</span>');
-    const dash = rate===null ? '0,100' : `${rate},${100-rate}`;
-    const center = rate===null ? 'No Data' : `${rate}%`;
-
-    const tile = document.createElement('a');
-    tile.className = 'tile';
-    tile.href = '#sec-'+String(sec).replace(/\s+/g,'-').toLowerCase();
-    tile.innerHTML = `
-      <svg class="donut" viewBox="0 0 36 36" aria-hidden="true">
-        <circle cx="18" cy="18" r="15.915" fill="none" stroke="#EAEFF5" stroke-width="3.8"></circle>
-        <circle cx="18" cy="18" r="15.915" fill="none" stroke="#7A6C5D" stroke-width="3.8" stroke-linecap="round" stroke-dasharray="${dash}"></circle>
-        <text x="18" y="20" text-anchor="middle">${center}</text>
-      </svg>
-      <div class="name">${sec}</div>
-      ${pill}
-    `;
-    tiles.appendChild(tile);
-  }
-}
-
-/* === Render photos section === */
 function toDrivePreview(u){
   try{
     if(!u.includes('drive.google.com')) return null;
@@ -217,84 +138,252 @@ function toDrivePreview(u){
     return id ? ('https://drive.google.com/file/d/'+id+'/preview') : null;
   }catch(e){ return null; }
 }
-function renderPhotos(agg){
-  const wrap = document.getElementById('photoSections');
-  wrap.innerHTML = '';
-  const secs = Object.keys(agg.photos).sort((a,b)=>String(a).localeCompare(String(b), undefined, {numeric:true}));
-  if (!secs.length){
-    wrap.innerHTML = '<div class="small">No photos for this period.</div>';
+
+/* ====== Fetch and parse pubhtml table into rows ======
+   - Finds the first `.waffle` table for the selected gid (or the first table).
+   - Builds headers from the first row; subsequent rows become objects.
+   - Extracts link href when present, else uses textContent.
+*/
+async function fetchSheetRowsFromPubHTML(pubhtml){
+  const url = pubhtml + (pubhtml.includes('?') ? '&' : '?') + '_ts_=' + Date.now();
+  let res;
+  try {
+    res = await fetch(url, {cache:'no-store', mode:'cors'});
+  } catch (e) {
+    throw new Error('Network error: '+(e?.message || String(e)));
+  }
+  if(!res.ok){
+    const txt = await res.text().catch(()=> '');
+    const snip = txt ? (' Response preview: '+txt.slice(0,200).replace(/\s+/g,' ')) : '';
+    throw new Error(`HTTP ${res.status} ${res.statusText}.${snip}`);
+  }
+  const html = await res.text();
+  // Parse the HTML
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  // If #gid is specified, try to find the corresponding table anchor
+  const hash = (new URL(pubhtml, location.href)).hash;
+  let table = null;
+  if(hash && hash.includes('gid=')){
+    const gid = hash.match(/gid=(\d+)/)?.[1];
+    // Google adds <a name="gid=12345"> before the table; find the next .waffle
+    const anchor = doc.querySelector(`a[name="gid=${gid}"]`);
+    if(anchor){
+      let el = anchor.nextElementSibling;
+      while(el){
+        if(el.tagName === 'TABLE' && el.classList.contains('waffle')) { table = el; break; }
+        el = el.nextElementSibling;
+      }
+    }
+  }
+  // Fallback: first waffle table
+  if(!table) table = doc.querySelector('table.waffle');
+  if(!table) throw new Error('Could not find sheet table in published HTML. Is the sheet/tab public?');
+
+  const rows = Array.from(table.querySelectorAll('tr'));
+  if(rows.length === 0) return [];
+
+  // Build headers from the first TR
+  const headerCells = Array.from(rows[0].querySelectorAll('th,td'));
+  const headers = headerCells.map(th => th.textContent.trim());
+
+  // Normalize duplicate/blank headers
+  const seen = new Map();
+  const normHeaders = headers.map((h, i) => {
+    let name = h || `Col_${i+1}`;
+    if(seen.has(name)){ const n = seen.get(name)+1; seen.set(name, n); name = `${name} (${n})`; }
+    else seen.set(name, 1);
+    return name;
+  });
+
+  // Convert each subsequent row to object (use link href if present)
+  const out = [];
+  for(let r=1; r<rows.length; r++){
+    const cells = Array.from(rows[r].querySelectorAll('td,th'));
+    if(cells.length === 0) continue;
+    const obj = {};
+    for(let c=0; c<normHeaders.length; c++){
+      const cell = cells[c];
+      if(!cell) { obj[normHeaders[c]] = ''; continue; }
+      const a = cell.querySelector('a[href]');
+      obj[normHeaders[c]] = a ? a.getAttribute('href') : cell.textContent.trim();
+    }
+    // Skip completely empty rows
+    if(Object.values(obj).every(v => String(v||'').trim()==='')) continue;
+    out.push(obj);
+  }
+  return out;
+}
+
+/* ====== Aggregate ====== */
+function aggregate(rows){
+  const agg = { sections: {}, photos: {}, overall: {passes:0,fails:0,total:0,rate:0} };
+
+  rows.forEach((row)=>{
+    Object.entries(row).forEach(([header,val])=>{
+      const key = sectionKeyFromHeader(header);
+      if(!key) return;
+
+      if(isPhotoHeader(header)){
+        const urls = splitUrls(val);
+        if(!urls.length) return;
+        if(!agg.photos[key]) agg.photos[key] = [];
+        agg.photos[key].push(...urls.map(u => ({url:u, ts: parseTimestamp(row) || new Date()})));
+        return;
+      }
+      if(isCommentOnlyHeader(header)) return;
+
+      const cls = classifyAnswer(val);
+      if(cls === 'ignore') return;
+
+      if(!agg.sections[key]) agg.sections[key] = {passes:0,fails:0,total:0};
+      if(cls === 'pass') agg.sections[key].passes += 1;
+      if(cls === 'fail') agg.sections[key].fails  += 1;
+      agg.sections[key].total += 1;
+    });
+  });
+
+  for(const s of Object.values(agg.sections)){
+    agg.overall.passes += s.passes;
+    agg.overall.fails  += s.fails;
+    agg.overall.total  += s.total;
+  }
+  agg.overall.rate = agg.overall.total ? (agg.overall.passes/agg.overall.total*100) : 0;
+  return agg;
+}
+
+/* ====== Render ====== */
+function renderTiles(agg){
+  const tiles=document.getElementById('tiles'); tiles.innerHTML='';
+  const keys = Object.keys(agg.sections).sort();
+  if(!keys.length){
+    tiles.innerHTML = '<div class="small">No sections detected. Ensure question headers start with a code like <code>[BR_1]</code>, <code>[GQ]</code>, etc.</div>';
     return;
   }
-  for (const sec of secs){
-    const id='sec-'+String(sec).replace(/\s+/g,'-').toLowerCase();
-    const secDiv=document.createElement('div'); secDiv.className='section'; secDiv.id=id;
-    secDiv.innerHTML=`<div class="sec-title">${sec}</div>`;
+  keys.forEach(k=>{
+    const s = agg.sections[k];
+    const rate = s.total ? Math.round((s.passes/s.total)*100) : null;
+    const dash = rate===null ? '0,100' : rate+','+(100-rate);
+    const center = rate===null ? 'No Data' : (rate+'%');
+    const pill = s.total===0
+      ? '<span class="pill na">No data</span>'
+      : (s.fails>0 ? `<span class="pill bad">${s.fails} issue${s.fails>1?'s':''}</span>` : '<span class="pill ok">Clear</span>');
+    const name = FRIENDLY[k] ? `${FRIENDLY[k]} (${k})` : k;
+
+    const a = document.createElement('a'); a.className='tile'; a.href='#sec-'+k.toLowerCase();
+    a.innerHTML = `
+      <svg class="donut" viewBox="0 0 36 36">
+        <circle cx="18" cy="18" r="15.915" fill="none" stroke="#EAEFF5" stroke-width="3.8"></circle>
+        <circle cx="18" cy="18" r="15.915" fill="none" stroke="#7A6C5D" stroke-width="3.8" stroke-linecap="round" stroke-dasharray="${dash}"></circle>
+        <text x="18" y="20" text-anchor="middle">${center}</text>
+      </svg>
+      <div class="name">${name}</div>
+      ${pill}
+    `;
+    tiles.appendChild(a);
+  });
+}
+
+function renderPhotos(agg){
+  const wrap=document.getElementById('photoSections'); wrap.innerHTML='';
+  const keys = Object.keys(agg.photos).sort();
+  keys.forEach(k=>{
+    const id='sec-'+k.toLowerCase();
+    const sec=document.createElement('div'); sec.className='section'; sec.id=id;
+    const title = FRIENDLY[k] ? `${FRIENDLY[k]} (${k})` : k;
+    sec.innerHTML = `<div class="sec-title">${title}</div>`;
     const g=document.createElement('div'); g.className='gallery';
-    (agg.photos[sec]||[]).slice(0,100).forEach(item=>{
+
+    agg.photos[k].slice(0,60).forEach(({url,ts})=>{
       const fig=document.createElement('figure'); fig.className='ph';
-      const img=document.createElement('img'); img.alt=sec+' photo'; img.loading='lazy'; img.referrerPolicy='no-referrer'; img.src=item.url;
+      const img=document.createElement('img'); img.alt=title+' photo'; img.loading='lazy'; img.referrerPolicy='no-referrer'; img.src=url;
       img.onerror=()=>{
-        const preview = toDrivePreview(item.url);
-        if(preview){
-          const ifr = document.createElement('iframe'); ifr.loading='lazy'; ifr.src=preview; fig.appendChild(ifr); img.remove();
-        } else {
-          const a=document.createElement('a'); a.href=item.url; a.target='_blank'; a.textContent='Open Photo'; img.replaceWith(a);
-        }
+        const prev = toDrivePreview(url);
+        if(prev){ const ifr=document.createElement('iframe'); ifr.loading='lazy'; ifr.src=prev; fig.appendChild(ifr); img.remove(); }
+        else{ const a=document.createElement('a'); a.href=url; a.target='_blank'; a.textContent='Open Photo'; img.replaceWith(a); }
       };
       const cap=document.createElement('figcaption');
-      const left=document.createElement('span'); left.className='cap-left'; left.textContent=sec;
-      const right=document.createElement('span'); right.className='cap-right'; right.textContent = item.ts ? (new Date(item.ts)).toLocaleString() : '';
+      const left=document.createElement('span'); left.className='cap-left'; left.textContent=title;
+      const right=document.createElement('span'); right.className='cap-right'; right.textContent=(new Date(ts)).toLocaleString();
       cap.appendChild(left); cap.appendChild(right);
       fig.appendChild(img); fig.appendChild(cap); g.appendChild(fig);
     });
-    secDiv.appendChild(g); wrap.appendChild(secDiv);
-  }
+
+    sec.appendChild(g); wrap.appendChild(sec);
+  });
 }
 
-/* === Selectors & interactions === */
+/* ====== Year/Month controls ====== */
 function populateSelectors(){
-  const ySel = document.getElementById('year');
-  const mSel = document.getElementById('month');
+  const ySel=document.getElementById('year');
+  const mSel=document.getElementById('month');
   ySel.innerHTML='';
-  YEARS.forEach(y=>{
-    const opt=document.createElement('option'); opt.value=y; opt.textContent=y; ySel.appendChild(opt);
-  });
-  if (YEARS.length) ySel.value = YEARS[YEARS.length-1];
+  YEARS.forEach(y=>{ const opt=document.createElement('option'); opt.value=y; opt.textContent=y; ySel.appendChild(opt); });
+  if(YEARS.length) ySel.value = YEARS[YEARS.length-1];
 
   function fillMonths(y){
     mSel.innerHTML='';
-    const months = (MONTHS_BY_YEAR[String(y)] || []).sort((a,b)=>a-b);
+    const months=(MONTHS_BY_YEAR[String(y)]||[]).sort((a,b)=>a-b);
     months.forEach(m=>{
       const opt=document.createElement('option');
-      opt.value=m;
-      opt.textContent=monthName(m);
+      opt.value=m; opt.textContent=monthName(m);
       mSel.appendChild(opt);
     });
-    if(months.length){ mSel.value = months[months.length-1]; }
+    if(months.length) mSel.value = months[months.length-1];
   }
   fillMonths(ySel.value);
-  ySel.onchange = ()=>{ fillMonths(ySel.value); applyYearMonth(); };
-  mSel.onchange = applyYearMonth;
+  ySel.addEventListener('change', ()=>{ fillMonths(ySel.value); applyYearMonth(); });
+  mSel.addEventListener('change', applyYearMonth);
 }
+
 function applyYearMonth(){
   const y = parseInt(document.getElementById('year').value,10);
   const m = parseInt(document.getElementById('month').value,10);
-  const rows = RAW_ROWS.filter(r=>{ const d=deriveYearMonth(r); return d.year===y && d.month===m; });
-  const agg = aggregateBySection(rows);
+  const rows = RAW_ROWS.filter(r=>{
+    const d = deriveYM(r);
+    return d.year===y && d.month===m;
+  });
+  const agg = aggregate(rows);
   const label = rows.length ? `${monthName(m)} ${y}` : 'No data';
   document.getElementById('summaryDate').textContent = label;
   renderTiles(agg);
   renderPhotos(agg);
 }
+
+/* ====== Build Year/Month index from timestamps ====== */
+function buildIndex(rows){
+  const years = new Set();
+  const monthsByYear = {};
+  let latest = { ts:0, year:undefined, month:undefined };
+
+  rows.forEach(r=>{
+    const d = parseTimestamp(r);
+    if(!d) return;
+    const y = d.getFullYear();
+    const m = d.getMonth()+1;
+    years.add(y);
+    if(!monthsByYear[y]) monthsByYear[y] = new Set();
+    monthsByYear[y].add(m);
+    const t = d.getTime();
+    if(t > latest.ts) latest = { ts:t, year:y, month:m };
+  });
+
+  YEARS = Array.from(years).sort((a,b)=>a-b);
+  MONTHS_BY_YEAR = {};
+  Object.entries(monthsByYear).forEach(([y,set])=>{
+    MONTHS_BY_YEAR[y] = Array.from(set).sort((a,b)=>a-b);
+  });
+  LATEST_YM = { year: latest.year, month: latest.month };
+}
+
+/* ====== Actions ====== */
 function jumpToLast(){
-  if (!LATEST_YM.year || !LATEST_YM.month) return;
-  const ySel = document.getElementById('year');
-  const mSel = document.getElementById('month');
+  if(!LATEST_YM.year || !LATEST_YM.month) return;
+  const ySel=document.getElementById('year');
+  const mSel=document.getElementById('month');
   ySel.value = String(LATEST_YM.year);
-  // ensure month list for selected year is in DOM
-  const months = (MONTHS_BY_YEAR[String(LATEST_YM.year)] || []).sort((a,b)=>a-b);
   mSel.innerHTML='';
-  months.forEach(m=>{
+  (MONTHS_BY_YEAR[String(LATEST_YM.year)]||[]).sort((a,b)=>a-b).forEach(m=>{
     const opt=document.createElement('option');
     opt.value=m; opt.textContent=monthName(m); mSel.appendChild(opt);
   });
@@ -302,83 +391,19 @@ function jumpToLast(){
   applyYearMonth();
 }
 
-/* === Fetch & index === */
-async function fetchCSVRows(){
-  const url = CSV_URL + (CSV_URL.includes('?') ? '&' : '?') + '_ts_=' + Date.now();
-  let res;
-  try{
-    res = await fetch(url, { cache: 'no-store', mode: 'cors' });
-  }catch(e){
-    throw new Error('Network error: '+(e?.message||e));
-  }
-  if (!res.ok){
-    let text=''; try{text=await res.text();}catch(e){}
-    const hint = text ? (' Preview: '+text.slice(0,180).replace(/\s+/g,' ')) : '';
-    throw new Error(`HTTP ${res.status} ${res.statusText}.${hint}`);
-  }
-  const text = await res.text();
-  if (/^\s*<!doctype html>|<html[\s>]/i.test(text)) throw new Error('Got HTML instead of CSV. Make sure the link is a public CSV.');
-  const parsed = Papa.parse(text, { header:true, dynamicTyping:false, skipEmptyLines:true });
-  if (parsed.errors && parsed.errors.length){
-    const e = parsed.errors[0]; throw new Error(`CSV parse error at row ${e.row ?? '?'}: ${e.message}`);
-  }
-  return parsed.data;
-}
-function buildYearMonthIndex(rows){
-  const years = new Set();
-  const monthsMap = {}; // {year: Set(months)}
-  let latest = {ts:0, year:undefined, month:undefined};
-
-  for (const r of rows){
-    const d = getRowDate(r);
-    if (!d) continue;
-    const y = d.getFullYear(), m = d.getMonth()+1;
-    years.add(y);
-    if (!monthsMap[y]) monthsMap[y] = new Set();
-    monthsMap[y].add(m);
-    const t = +d;
-    if (t > latest.ts) { latest = {ts:t, year:y, month:m}; }
-  }
-  YEARS = Array.from(years).sort((a,b)=>a-b);
-  MONTHS_BY_YEAR = {};
-  for (const y of YEARS){ MONTHS_BY_YEAR[y] = Array.from(monthsMap[y]).sort((a,b)=>a-b); }
-  LATEST_YM = {year: latest.year, month: latest.month};
-}
-
-/* === Boot === */
+/* ====== Boot ====== */
 async function loadAndRender(){
-  setError(''); document.getElementById('summaryDate').textContent = 'Loading…';
+  setError('');
+  document.getElementById('summaryDate').textContent = 'Loading…';
   try{
-    const rows = await fetchCSVRows();
-    if (!rows.length){ throw new Error('CSV is empty.'); }
-
-    // Build col metadata from headers
-    const headers = Object.keys(rows[0] || {});
-    buildColMeta(headers);
-
-    // Save rows & index by dates
-    RAW_ROWS = rows;
-    buildYearMonthIndex(RAW_ROWS);
-
-    // Populate UI and render initial month (latest by default)
+    RAW_ROWS = await fetchSheetRowsFromPubHTML(PUBHTML_URL);
+    buildIndex(RAW_ROWS);
     populateSelectors();
-    if (LATEST_YM.year && LATEST_YM.month){
-      document.getElementById('year').value = String(LATEST_YM.year);
-      // fill month list for that year if needed
-      const months = (MONTHS_BY_YEAR[String(LATEST_YM.year)] || []).sort((a,b)=>a-b);
-      const mSel = document.getElementById('month');
-      mSel.innerHTML='';
-      months.forEach(m=>{
-        const opt=document.createElement('option');
-        opt.value=m; opt.textContent=monthName(m); mSel.appendChild(opt);
-      });
-      mSel.value = String(LATEST_YM.month);
-    }
     applyYearMonth();
   }catch(err){
     console.error(err);
     setError(err.message);
-    document.getElementById('summaryDate').textContent = 'Failed to load CSV';
+    document.getElementById('summaryDate').textContent = 'Failed to load';
     document.getElementById('tiles').innerHTML = '<div class="small">Could not load data.</div>';
     document.getElementById('photoSections').innerHTML = '';
   }
