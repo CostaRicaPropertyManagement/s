@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Owner Inspection — Year/Month (Live CSV)</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23111827'/%3E%3Cpath fill='%23FFD166' d='M14 42h36v6H14zM18 16h28a6 6 0 016 6v14H12V22a6 6 0 016-6z'/%3E%3Ccircle cx='22' cy='25' r='3' fill='%2306D6A0'/%3E%3Ccircle cx='32' cy='25' r='3' fill='%23FFD166'/%3E%3Ccircle cx='42' cy='25' r='3' fill='%23EF476F'/%3E%3C/svg%3E"/>
+<style>
+:root{--bg:#fff;--ink:#111827;--muted:#6B7280;--line:#E5E7EB;--ok:#287271;--bad:#9B2226;--brand:#1F2937}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto}
+.wrap{max-width:1200px;margin:0 auto;padding:20px 20px 60px}
+.header{display:flex;align-items:center;justify-content:space-between;gap:16px;position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:10px 0;z-index:10}
+.h-left{display:flex;align-items:baseline;gap:12px}
+.h-title{font-weight:900;font-size:18px;color:var(--brand)}
+.h-sub{color:var(--muted);font-size:12px}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+select{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px}
+.btn{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;color:var(--brand);cursor:pointer}
+.kpi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:12px}
+.kpi{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff}
+.kpi .donut{width:100px;height:100px}
+.kpi .info{display:flex;flex-direction:column}
+.kpi .label{font-size:12px;color:var(--muted);font-weight:700}
+.kpi .value{font-size:20px;font-weight:900}
+.tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:14px}
+.tile{display:flex;flex-direction:column;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff;text-decoration:none;color:inherit}
+.tile .name{font-weight:800;margin-top:6px}
+.tile .pill{font-size:11px;margin-top:6px;padding:3px 7px;border-radius:999px;border:1px solid var(--line)}
+.pill.ok{background:#ECFDF5;color:#065F46;border-color:#A7F3D0}.pill.bad{background:#FEF2F2;color:#991B1B;border-color:#FECACA}
+.pill.na{background:#F3F4F6;color:#374151;border-color:#E5E7EB}
+.section{margin:18px 0}.sec-title{font-weight:900;border-left:4px solid #111827;padding-left:10px;margin:6px 0 10px}
+.gallery{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.ph{margin:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;position:relative}
+.ph img,.ph iframe{width:100%;height:160px;object-fit:cover;display:block;border:0}
+.ph figcaption{font-size:11px;color:#6B7280;padding:6px 8px;display:flex;justify-content:space-between;gap:6px}
+.cap-left{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cap-right{color:#374151;white-space:nowrap}
+.small{font-size:12px;color:var(--muted)}
+.donut{width:72px;height:72px}
+.tile svg text{font-size:6px;font-weight:800;fill:#111827}
+</style>
+<!-- Papa Parse for robust CSV parsing -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="h-left">
+        <div class="h-title">Owner Inspection — Year / Month</div>
+        <div class="h-sub small" id="summaryDate"></div>
+      </div>
+      <div class="controls">
+        <select id="year" title="Year"></select>
+        <select id="month" title="Month"></select>
+        <button id="applyYM" class="btn">Apply</button>
+      </div>
+    </div>
+
+    <section id="tiles" class="tiles"></section>
+
+    <section id="photos" class="section">
+      <div class="sec-title">Photos (Selected Year/Month)</div>
+      <div id="photoSections"></div>
+    </section>
+  </div>
+
+<script>
+/** 🔗 Set this to your live CSV URL (e.g., Google Sheets "Publish to web" CSV) */
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/1IXs5vWCMzK1EqfPnNteNU1g_JbyXCSQphVg3AB3UHAc/export?format=csv&id=1IXs5vWCMzK1EqfPnNteNU1g_JbyXCSQphVg3AB3UHAc&gid=1250115751';
+
+/** Internal state populated from CSV */
+let RAW_ROWS = [];
+let YEARS = [];
+let MONTHS_BY_YEAR = {};
+
+/** Utilities */
+function toNum(v){ const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function firstDefined(...xs){ return xs.find(x => x !== undefined && x !== null && String(x).trim() !== ""); }
+function safePct(x){ const v = Number.isFinite(x) ? x : 0; return Math.max(0, Math.min(100, Math.round(v))); }
+
+function deriveYearMonth(row){
+  const y = row.year ?? row.Year ?? row.YEAR;
+  const m = row.month ?? row.Month ?? row.MONTH;
+  if (y && m) return {year: +y, month: +m};
+  const t = firstDefined(row.timestamp, row.Timestamp, row.ts, row.TS, row.photo_ts, row['photo ts']);
+  const d = t ? new Date(t) : null;
+  return d && !isNaN(d) ? {year: d.getFullYear(), month: d.getMonth()+1} : {year: undefined, month: undefined};
+}
+
+function aggregateFromRows(rows){
+  const agg={overall:{total:0,passes:0,fails:0,rate:0}, sections:{}, photos:{}};
+  rows.forEach(r=>{
+    const section = firstDefined(r.section, r.Section, r.SECTION);
+    const passes = toNum(firstDefined(r.passes, r.Passes, r.PASS, r.PASSes));
+    const fails  = toNum(firstDefined(r.fails, r.Fails, r.FAIL));
+    const total  = toNum(firstDefined(r.total, r.Total, r.TOTAL)) || (passes + fails);
+
+    if(section){
+      if(!agg.sections[section]) agg.sections[section]={total:0,passes:0,fails:0};
+      agg.sections[section].total += total;
+      agg.sections[section].passes += passes;
+      agg.sections[section].fails  += fails;
+    }
+
+    agg.overall.total  += total;
+    agg.overall.passes += passes;
+    agg.overall.fails  += fails;
+
+    const purl = firstDefined(r.photo_url, r.photo, r.url, r.Photo, r.URL);
+    const pts  = firstDefined(r.photo_ts, r['photo ts'], r.timestamp, r.ts, r.Timestamp, r.TS) || new Date().toISOString();
+    if(purl && section){
+      if(!agg.photos[section]) agg.photos[section]=[];
+      agg.photos[section].push({url:purl, ts:pts});
+    }
+  });
+  agg.overall.rate = agg.overall.total ? (agg.overall.passes/agg.overall.total*100) : 0;
+  return agg;
+}
+
+function renderTiles(agg){
+  const tiles=document.getElementById('tiles');
+  tiles.innerHTML='';
+  const secs=Object.keys(agg.sections).sort();
+  secs.forEach(sec=>{
+    const s=agg.sections[sec];
+    const total = s.total || 0;
+    const passes = s.passes || 0;
+    const fails  = s.fails  || 0;
+    const rate = total ? Math.round((passes/total)*100) : null; // null => No Data
+    const pill = total === 0
+      ? '<span class="pill na">No data</span>'
+      : (fails>0 ? '<span class="pill bad">'+fails+' issue'+(fails>1?'s':'')+'</span>' : '<span class="pill ok">Clear</span>');
+    const dash = rate===null ? '0,100' : rate+','+(100-rate);
+    const center = rate===null ? 'No Data' : (rate+'%');
+
+    const tile=document.createElement('a'); tile.className='tile'; tile.href='#sec-'+sec.replace(/\s+/g,'-').toLowerCase();
+    tile.innerHTML=`
+      <svg class="donut" viewBox="0 0 36 36">
+        <circle cx="18" cy="18" r="15.915" fill="none" stroke="#EAEFF5" stroke-width="3.8"></circle>
+        <circle cx="18" cy="18" r="15.915" fill="none" stroke="#7A6C5D" stroke-width="3.8" stroke-linecap="round" stroke-dasharray="${dash}"></circle>
+        <text x="18" y="20" text-anchor="middle">${center}</text>
+      </svg>
+      <div class="name">${sec}</div>
+      ${pill}`;
+    tiles.appendChild(tile);
+  });
+}
+
+function toDrivePreview(u){
+  try{
+    if(!u.includes('drive.google.com')) return null;
+    const m = u.match(/\/file\/d\/([^/]+)\//);
+    let id = m ? m[1] : null;
+    if(!id){
+      const url = new URL(u);
+      id = url.searchParams.get('id');
+    }
+    return id ? ('https://drive.google.com/file/d/'+id+'/preview') : null;
+  }catch(e){ return null; }
+}
+
+function renderPhotos(agg){
+  const wrap=document.getElementById('photoSections');
+  wrap.innerHTML='';
+  const secs=Object.keys(agg.photos).sort();
+  secs.forEach(sec=>{
+    const id='sec-'+sec.replace(/\s+/g,'-').toLowerCase();
+    const secDiv=document.createElement('div'); secDiv.className='section'; secDiv.id=id;
+    secDiv.innerHTML=`<div class="sec-title">${sec}</div>`;
+    const g=document.createElement('div'); g.className='gallery';
+    (agg.photos[sec]||[]).slice(0,60).forEach(item=>{
+      const url = item.url, ts = item.ts;
+      const fig=document.createElement('figure'); fig.className='ph';
+      const img=document.createElement('img'); img.alt=sec+' photo'; img.loading='lazy'; img.referrerPolicy='no-referrer'; img.src=url;
+      img.onerror=()=>{
+        const preview = toDrivePreview(url);
+        if(preview){
+          const ifr = document.createElement('iframe'); ifr.loading='lazy'; ifr.src=preview; fig.appendChild(ifr);
+          img.remove();
+        } else {
+          const a=document.createElement('a'); a.href=url; a.target='_blank'; a.textContent='Open Photo'; img.replaceWith(a);
+        }
+      };
+      const cap=document.createElement('figcaption');
+      const left=document.createElement('span'); left.className='cap-left'; left.textContent=sec;
+      const right=document.createElement('span'); right.className='cap-right'; right.textContent = (new Date(ts)).toLocaleString();
+      cap.appendChild(left); cap.appendChild(right);
+      fig.appendChild(img); fig.appendChild(cap); g.appendChild(fig);
+    });
+    secDiv.appendChild(g); wrap.appendChild(secDiv);
+  });
+}
+
+/** UI plumbing */
+function populateYearMonthSelectors(){
+  const ySel = document.getElementById('year');
+  const mSel = document.getElementById('month');
+  ySel.innerHTML='';
+  YEARS.forEach(y=>{
+    const opt=document.createElement('option'); opt.value=y; opt.textContent=y; ySel.appendChild(opt);
+  });
+  if (YEARS.length) ySel.value = YEARS[YEARS.length-1];
+
+  function fillMonths(y){
+    mSel.innerHTML='';
+    const months = (MONTHS_BY_YEAR[String(y)] || []).sort((a,b)=>a-b);
+    months.forEach(m=>{
+      const opt=document.createElement('option');
+      opt.value=m;
+      const name=new Date(2000,m-1,1).toLocaleString(undefined,{month:'long'});
+      opt.textContent=name;
+      mSel.appendChild(opt);
+    });
+    if(months.length){ mSel.value = months[months.length-1]; }
+  }
+  fillMonths(ySel.value);
+  ySel.addEventListener('change', ()=>{ fillMonths(ySel.value); applyYearMonth(); });
+  mSel.addEventListener('change', applyYearMonth);
+}
+
+function applyYearMonth(){
+  const y = parseInt(document.getElementById('year').value,10);
+  const m = parseInt(document.getElementById('month').value,10);
+  const rows = RAW_ROWS.filter(r=>{
+    const d = deriveYearMonth(r);
+    return d.year===y && d.month===m;
+  });
+  const agg = aggregateFromRows(rows);
+
+  const label = rows.length
+    ? new Date(y, m-1, 1).toLocaleString(undefined,{year:'numeric',month:'long'})
+    : 'No data';
+  document.getElementById('summaryDate').textContent = label;
+
+  renderTiles(agg);
+  renderPhotos(agg);
+}
+
+/** Data loading */
+async function fetchCSVRows(){
+  const res = await fetch(CSV_URL + (CSV_URL.includes('?') ? '&' : '?') + '_ts_=' + Date.now(), { cache: 'no-store' });
+  if(!res.ok) throw new Error('CSV fetch failed: ' + res.status);
+  const text = await res.text();
+  const parsed = Papa.parse(text, { header: true, dynamicTyping: false, skipEmptyLines: true });
+  return parsed.data;
+}
+
+function buildYearMonthIndex(rows){
+  const years = new Set();
+  const map = {};
+  rows.forEach(r=>{
+    const {year, month} = deriveYearMonth(r);
+    if(!year || !month) return;
+    years.add(year);
+    const key = String(year);
+    if(!map[key]) map[key] = new Set();
+    map[key].add(month);
+  });
+  YEARS = Array.from(years).sort((a,b)=>a-b);
+  MONTHS_BY_YEAR = {};
+  Object.entries(map).forEach(([y, set])=>{
+    MONTHS_BY_YEAR[y] = Array.from(set).sort((a,b)=>a-b);
+  });
+}
+
+async function loadAndRender(){
+  document.getElementById('summaryDate').textContent = 'Loading…';
+  try{
+    RAW_ROWS = await fetchCSVRows();
+    buildYearMonthIndex(RAW_ROWS);
+    populateYearMonthSelectors();
+    applyYearMonth();
+  }catch(err){
+    console.error(err);
+    document.getElementById('summaryDate').textContent = 'Failed to load CSV';
+    document.getElementById('tiles').innerHTML = '<div class="small">Could not load data.</div>';
+    document.getElementById('photoSections').innerHTML = '';
+  }
+}
+
+document.getElementById('applyYM').addEventListener('click', applyYearMonth);
+
+/** Init */
+loadAndRender();
+</script>
+</body>
+</html>
