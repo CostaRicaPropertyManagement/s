@@ -64,7 +64,7 @@ select,button{border:1px solid var(--line);border-radius:8px;padding:8px 10px;fo
 <script>
 /* ====== Your published HTML link (pubhtml) ====== */
 const PUBHTML_URL = 'https://docs.google.com/spreadsheets/u/5/d/e/2PACX-1vTH18JY92PQUibhQfTwhTcJZpEEuz-NrBbe4fUWAB0lSCT2tY-X9GwIVEQhr8XCHEH08EHfq3vav1Td/pubhtml';
-const TARGET_SHEET_NAME = 'Form Responses 1'; // required sheet; falls back to first if not found
+const TARGET_SHEET_NAME = 'Form Responses 1'; // this sheet is required
 
 /* ====== State ====== */
 let RAW_ROWS = [];
@@ -72,13 +72,13 @@ let YEARS = [];
 let MONTHS_BY_YEAR = {};
 let LATEST_YM = {year:undefined, month:undefined};
 
-/* ====== Header/column hints ====== */
+/* ====== Column hints ====== */
 const TS_KEYS = ['Timestamp','timestamp','Marca temporal','marca temporal','Fecha','fecha','Fecha y hora','fecha y hora','Date','Datetime','date','datetime'];
-const META_HINTS = ['email','correo','name','nombre','inspector','by who','por quién','submitted','enviado']; // ignore as questions
+const META_HINTS = ['email','correo','name','nombre','inspector','by who','por quién','submitted','enviado'];
 const PHOTO_HINTS = ['photo','photos','foto','fotos','imagen','imágenes','image','images','picture','pictures','pic'];
 const COMMENT_HINTS = ['if you answered','si respondió','si respondiste','describe','describa','coment','comment','nota','notes','observación','observaciones','por favor','explain','explique'];
 
-/* Optional friendly names for section codes */
+/* Friendly names for section codes */
 const FRIENDLY = {
   BR:'Bedroom', BD:'Bedroom', BA:'Bathroom', KT:'Kitchen', LR:'Living Room',
   GQ:'General', LL:'Locks & Lights', LA:'Laundry', DR:'Dining Room', EX:'Exterior',
@@ -93,7 +93,6 @@ const isUrlish = (s)=>/\bhttps?:\/\/|^www\./i.test(String(s||''));
 const firstVal = (row, keys)=>{ for(const k of keys){ if(row[k]!=null && String(row[k]).trim()!=='') return row[k]; } return undefined; };
 const monthName = (m)=> new Date(2000, m-1, 1).toLocaleString(undefined,{month:'long'});
 
-/* Timestamp helpers */
 function parseTimestamp(row){
   const t = firstVal(row, TS_KEYS);
   if(!t) return null;
@@ -108,10 +107,9 @@ function deriveYM(row){
 /* Section detection */
 function sectionKeyFromHeader(h){
   if(!h) return null;
-  // Look for bracket code anywhere in the header, not just at the start
-  const m = String(h).match(/\[([A-Za-z0-9_]+)\]/);
+  const m = String(h).match(/\[([A-Za-z0-9_]+)\]/); // allow anywhere in the header
   if(!m) return null;
-  return m[1].replace(/_.*/, ''); // base group (e.g., BR_1 -> BR)
+  return m[1].replace(/_.*/, ''); // e.g., BR_1 -> BR
 }
 function isMetaHeader(h){
   const l = lower(h||'');
@@ -120,26 +118,22 @@ function isMetaHeader(h){
 function isPhotoHeader(h){ return PHOTO_HINTS.some(hint => lower(h||'').includes(hint)); }
 function isCommentOnlyHeader(h){ return COMMENT_HINTS.some(hint => lower(h||'').includes(hint)); }
 
-/* Answer classification: Yes/Sí = pass, No = fail; ignore blanks/links/comments */
+/* Answer classification */
 function classifyAnswer(val){
   if(val==null) return 'ignore';
   const raw = String(val).trim();
   if(!raw) return 'ignore';
   if(isUrlish(raw)) return 'ignore';
   const norm = stripDiacritics(raw).toLowerCase();
-  if(norm === 'yes' || norm === 'si' || norm === 'sí') return 'pass';
-  if(norm === 'no') return 'fail';
+  if(norm==='yes' || norm==='si' || norm==='sí') return 'pass';
+  if(norm==='no') return 'fail';
   return 'ignore';
 }
-
-/* Split multiple URLs in a cell */
 function splitUrls(s){
   if(!s) return [];
   const parts = String(s).split(/[\s,;\n\r]+/).filter(Boolean);
   return parts.filter(isUrlish);
 }
-
-/* Drive preview helper */
 function toDrivePreview(u){
   try{
     if(!u.includes('drive.google.com')) return null;
@@ -150,7 +144,7 @@ function toDrivePreview(u){
   }catch{ return null; }
 }
 
-/* ====== pubhtml (widget + classic) ====== */
+/* ====== pubhtml widget helpers ====== */
 function unescapeJsString(s){
   return s
     .replace(/\\x3d/gi,'=')
@@ -176,7 +170,16 @@ function absoluteUrl(base, maybeRelative){
   catch { return maybeRelative; }
 }
 
-/* Get sheet page URL for TARGET_SHEET_NAME; fallback to the first sheet */
+/* Always force headers=true on the sheet page */
+function withHeadersTrue(url){
+  try{
+    const u = new URL(url, PUBHTML_URL);
+    u.searchParams.set('headers','true'); // override false -> true
+    return u.toString();
+  }catch{ return url + (url.includes('?')?'&':'?') + 'headers=true'; }
+}
+
+/* Get sheet page URL for TARGET_SHEET_NAME; fallback to first */
 async function getSheetPageUrl(pubhtml, targetName){
   const url = pubhtml + (pubhtml.includes('?') ? '&' : '?') + '_ts_=' + Date.now();
   const res = await fetch(url, {cache:'no-store', mode:'cors'});
@@ -187,26 +190,26 @@ async function getSheetPageUrl(pubhtml, targetName){
   const html = await res.text();
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
-  // Classic tabs on index (rare for widget pages)
+  // Classic tabs (rare with widget)
   const tabs = Array.from(doc.querySelectorAll('a[href^="#gid="]'));
   if(tabs.length){
     const exact = tabs.find(a => a.textContent.trim() === targetName);
     const chosen = exact || tabs[0];
     if(!exact) setError(`Sheet "${targetName}" not found on index; showing "${chosen.textContent.trim()}".`);
     const gid = chosen.getAttribute('href').match(/gid=(-?\d+)/)?.[1];
-    if(gid) return absoluteUrl(pubhtml, `sheet?headers=false&gid=${gid}`);
+    if(gid) return withHeadersTrue(absoluteUrl(pubhtml, `sheet?headers=false&gid=${gid}`));
   }
 
-  // Widget mode
+  // Widget items
   const items = parseWidgetItems(doc);
   if(!items.length) throw new Error('No sheets found in published page (widget list empty).');
   const exactItem = items.find(it => it.name.trim() === targetName);
   const chosenItem = exactItem || items[0];
   if(!exactItem) setError(`Sheet "${targetName}" not found; showing "${chosenItem.name}".`);
-  return absoluteUrl(pubhtml, chosenItem.pageUrl);
+  return withHeadersTrue(absoluteUrl(pubhtml, chosenItem.pageUrl));
 }
 
-/* Fetch rows from the sheet page (…/pubhtml/sheet?headers=false&gid=…) */
+/* Fetch rows from the sheet page */
 async function fetchRowsFromSheetPage(sheetPageUrl){
   const url = sheetPageUrl + (sheetPageUrl.includes('?') ? '&' : '?') + '_ts_=' + Date.now();
   const res = await fetch(url, {cache:'no-store', mode:'cors'});
@@ -221,11 +224,10 @@ async function fetchRowsFromSheetPage(sheetPageUrl){
   return tableToRows(table);
 }
 
-/* Convert table → array of row objects */
+/* Convert table → rows */
 function tableToRows(table){
   const rows = Array.from(table.querySelectorAll('tr'));
   if(!rows.length) return [];
-  // Header row (from thead if available)
   let headerCells = Array.from(rows[0].querySelectorAll('th,td'));
   if(table.tHead && table.tHead.rows.length){
     headerCells = Array.from(table.tHead.rows[0].cells);
@@ -251,7 +253,6 @@ function tableToRows(table){
       const a = cell.querySelector('a[href]');
       obj[headers[c]] = a ? a.getAttribute('href') : cell.textContent.trim();
     }
-    // Skip empty rows
     if(Object.values(obj).every(v => String(v||'').trim()==='')) return;
     out.push(obj);
   });
@@ -263,20 +264,19 @@ function aggregate(rows){
   const agg = { sections: {}, photos: {}, overall: {passes:0,fails:0,total:0,rate:0} };
   let sawBracketCode = false;
 
-  rows.forEach((row)=>{
+  rows.forEach(row=>{
     Object.entries(row).forEach(([header,val])=>{
       if(isMetaHeader(header)) return;
 
       const code = sectionKeyFromHeader(header);
       if(code) sawBracketCode = true;
-
       const key = code || 'ALL';
 
       if(isPhotoHeader(header)){
         const urls = splitUrls(val);
         if(urls.length){
-          if(!agg.photos[key]) agg.photos[key] = [];
-          agg.photos[key].push(...urls.map(u => ({url:u, ts: parseTimestamp(row) || new Date()})));
+          if(!agg.photos[key]) agg.photos[key]=[];
+          agg.photos[key].push(...urls.map(u=>({url:u, ts: parseTimestamp(row)||new Date()})));
         }
         return;
       }
@@ -292,21 +292,18 @@ function aggregate(rows){
     });
   });
 
-  // If no bracket-coded questions at all, collapse photos also under ALL
   if(!sawBracketCode && Object.keys(agg.photos).length){
     const merged = {ALL: []};
     Object.values(agg.photos).forEach(arr => merged.ALL.push(...arr));
     agg.photos = merged;
   }
 
-  // Overall
   Object.values(agg.sections).forEach(s=>{
     agg.overall.passes += s.passes;
     agg.overall.fails  += s.fails;
     agg.overall.total  += s.total;
   });
   agg.overall.rate = agg.overall.total ? (agg.overall.passes/agg.overall.total*100) : 0;
-
   return agg;
 }
 
@@ -341,7 +338,6 @@ function renderTiles(agg){
     tiles.appendChild(a);
   });
 }
-
 function renderPhotos(agg){
   const wrap=document.getElementById('photoSections'); wrap.innerHTML='';
   const keys = Object.keys(agg.photos).sort();
@@ -375,13 +371,13 @@ function renderPhotos(agg){
   });
 }
 
-/* ====== Year/Month selectors ====== */
+/* ====== Year/Month controls ====== */
 function populateSelectors(){
   const ySel=document.getElementById('year');
   const mSel=document.getElementById('month');
   ySel.innerHTML='';
   YEARS.forEach(y=>{ const opt=document.createElement('option'); opt.value=y; opt.textContent=y; ySel.appendChild(opt); });
-  if(YEARS.length) ySel.value = YEARS[YEEARS.length-1];
+  if(YEARS.length) ySel.value = YEARS[YEARS.length-1]; // fixed typo
 
   function fillMonths(y){
     mSel.innerHTML='';
@@ -456,7 +452,7 @@ async function loadAndRender(){
   setError('');
   document.getElementById('summaryDate').textContent = 'Loading…';
   try{
-    const sheetPageUrl = await getSheetPageUrl(PUBHTML_URL, TARGET_SHEET_NAME);
+    const sheetPageUrl = await getSheetPageUrl(PUBHTML_URL, TARGET_SHEET_NAME); // now enforces headers=true
     RAW_ROWS = await fetchRowsFromSheetPage(sheetPageUrl);
     buildIndex(RAW_ROWS);
     populateSelectors();
