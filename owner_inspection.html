@@ -1,0 +1,663 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Owner Inspection — Live</title>
+
+<!-- PapaParse (no SRI, no CSP) -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" defer></script>
+
+<link rel="preconnect" href="https://docs.google.com">
+<link rel="preconnect" href="https://drive.google.com">
+
+<style>
+/* === Light theme tokens === */
+:root{--bg:#fff;--ink:#111827;--muted:#6B7280;--line:#E5E7EB;--brand:#1F2937}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto}
+.wrap{max-width:1200px;margin:0 auto;padding:20px}
+
+/* Header */
+.header{display:flex;flex-wrap:wrap;align-items:center;gap:12px;position:sticky;top:0;background:#fff;border-bottom:1px solid var(--line);padding:10px 0;z-index:10}
+.h-title{font-weight:900;font-size:18px;color:var(--brand)}
+.h-sub{color:var(--muted);font-size:12px}
+
+/* Controls */
+.controls{display:flex;flex-wrap:wrap;gap:8px}
+label{font-size:12px;color:var(--muted);margin-right:6px}
+select,button{border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;background:#fff;color:#1F2937}
+button{cursor:pointer}
+button:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+
+/* Tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:14px}
+.tile{display:flex;flex-direction:column;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff;text-decoration:none;color:inherit}
+.tile .name{font-weight:800;margin-top:6px;text-align:center}
+.tile .pill{font-size:11px;margin-top:6px;padding:3px 7px;border-radius:999px;border:1px solid var(--line)}
+.pill.ok{background:#ECFDF5;color:#065F46;border-color:#A7F3D0}
+.pill.bad{background:#FEF2F2;color:#991B1B;border-color:#FECACA}
+.pill.na{background:#F3F4F6;color:#374151;border-color:#E5E7EB}
+
+/* Sections + gallery */
+.section{margin:18px 0}
+.sec-title{font-weight:900;border-left:4px solid var(--brand);padding-left:10px;margin:6px 0 10px}
+.gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
+.ph{margin:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;position:relative}
+.ph img,.ph iframe{width:100%;height:160px;object-fit:cover;display:block;border:0}
+.ph figcaption{font-size:11px;color:#6B7280;padding:6px 8px;display:flex;justify-content:space-between;gap:6px}
+.cap-left{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cap-right{color:#374151;white-space:nowrap}
+.small{font-size:12px;color:#6B7280}
+.warn{color:#9B2226}
+
+/* Donut */
+.donut{width:72px;height:72px}
+.tile svg text{font-size:6px;font-weight:800;fill:#111827}
+
+/* Utility */
+.hidden{display:none}
+
+/* Skip link */
+.skip-link{position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden}
+.skip-link:focus{position:static;width:auto;height:auto;padding:8px;border:1px solid var(--line);background:#fff;border-radius:8px}
+
+/* Issues Summary styles */
+.issues{border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff}
+.issues h3{margin:10px 0 6px;font-size:14px}
+.issues ul{margin:0 0 8px 16px;padding:0}
+.issues li{margin:2px 0}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<div class="wrap">
+  <header class="header" role="banner">
+    <div>
+      <h1 class="h-title" id="pageTitle">Owner Inspection — Year / Month</h1>
+      <div class="h-sub small" id="summaryDate" aria-live="polite"></div>
+    </div>
+    <div class="controls" aria-label="Filters">
+      <label for="year">Year</label>
+      <select id="year" title="Year" aria-labelledby="year"></select>
+
+      <label for="month">Month</label>
+      <select id="month" title="Month" aria-labelledby="month"></select>
+
+      <label for="inspection" class="hidden" id="inspectionLabel">Inspection</label>
+      <select id="inspection" title="Inspection" class="hidden" aria-labelledby="inspectionLabel"></select>
+
+      <button id="lastBtn" type="button" title="Jump to most recent inspection">Last Inspection</button>
+      <button id="applyYM" type="button" title="Apply filters">Apply</button>
+    </div>
+  </header>
+
+  <main id="main" role="main" tabindex="-1">
+    <div id="errBox" class="small warn" role="alert" aria-live="assertive" style="margin:8px 0;"></div>
+
+    <!-- Issues Summary -->
+    <section class="section">
+      <h2 class="sec-title">Issues Summary</h2>
+      <div id="issuesSummary" class="issues small">Loading…</div>
+    </section>
+
+    <h2 class="sec-title" style="margin-top:16px;">Section status</h2>
+    <section id="tiles" class="tiles" aria-label="Section status tiles"></section>
+
+    <section class="section" aria-label="Photos">
+      <h2 class="sec-title">Photos (Selected)</h2>
+      <div id="photoSections"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* ====== CONFIG (CSV only) ====== */
+const DEFAULT_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTH18JY92PQUibhQfTwhTcJZpEEuz-NrBbe4fUWAB0lSCT2tY-X9GwIVEQhr8XCHEH08EHfq3vav1Td/pub?output=csv';
+const params = new URLSearchParams(location.search);
+const csvParam = params.get('csv');
+const CSV_URL = (csvParam && csvParam.trim()) ? csvParam.trim() : DEFAULT_CSV;
+
+/* ====== State ====== */
+let RAW_ROWS = [];
+let YEARS = [];
+let MONTHS_BY_YEAR = {};
+let LATEST_YM = {year:undefined, month:undefined};
+
+/* ====== Columns / rules ====== */
+const TS_KEYS = ['Timestamp','timestamp','Marca temporal','marca temporal','Fecha','fecha','Fecha y hora','fecha y hora','Date','Datetime','date','datetime'];
+const META_HINTS = ['email','correo','name','nombre','inspector','by who','por quién','submitted','enviado'];
+const PHOTO_HINTS = ['photo','photos','foto','fotos','imagen','imágenes','image','images','picture','pictures','pic'];
+const COMMENT_HINTS = ['if you answered','si respondió','si respondiste','describe','describa','coment','comment','nota','notes','observación','observaciones','por favor','explain','explique'];
+
+const FRIENDLY = {
+  BR:'Bedroom', BD:'Bedroom', BA:'Bathroom',
+  KT:'Kitchen', KI:'Kitchen',
+  LR:'Living Room', LV:'Living Room',
+  GQ:'General', LL:'Locks & Lights', LA:'Laundry', DR:'Dining Room', EX:'Exterior',
+  ALL:'All Checks'
+};
+
+// Address detection for title
+const ADDRESS_HINTS = ['address','direccion','dirección','property','propiedad','unit','apt','suite','street','calle'];
+
+/* ====== Utils ====== */
+const setError = (msg)=>{ document.getElementById('errBox').textContent = msg || ''; };
+const lower = (s)=>String(s||'').toLowerCase();
+const stripDiacritics = (s)=>String(s||'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'');
+const isUrlish = (s)=>/\\bhttps?:\\/\\/|^www\\./i.test(String(s||''));
+const monthName = (m)=> new Date(2000, m-1, 1).toLocaleString(undefined,{month:'long'});
+function firstVal(row, keys){ if(!row||typeof row!=='object') return undefined; for(const k of keys){ if(Object.prototype.hasOwnProperty.call(row,k)){ const v=row[k]; if(v!=null && String(v).trim()!=='') return v; }} return undefined; }
+const slug = (s)=> String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+
+/* ====== Timestamp helpers ====== */
+function parseTimestamp(row){
+  const t = firstVal(row, TS_KEYS);
+  if(!t) return null;
+  const d = new Date(t);
+  return Number.isFinite(+d) ? d : null;
+}
+function deriveYM(row){
+  const d = parseTimestamp(row);
+  return d ? {year:d.getFullYear(), month:d.getMonth()+1} : {year:undefined, month:undefined};
+}
+
+/* ====== Mojibake & token normalization ====== */
+function fixMojibake(s){
+  return String(s ?? '')
+    .replace(/sÃ­/gi,'sí')
+    .replace(/Ã¡/g,'á').replace(/Ã©/g,'é').replace(/Ã­/g,'í').replace(/Ã³/g,'ó').replace(/Ãº/g,'ú')
+    .replace(/Ã±/g,'ñ')
+    .replace(/Â¿/g,'¿').replace(/Â¡/g,'¡')
+    .replace(/Â/g,'');
+}
+function normalizeToken(value){
+  let t = fixMojibake(value).trim().toLowerCase();
+  t = t.replace(/\\s+/g,' ');
+  return stripDiacritics(t); // e.g., "sí" -> "si"
+}
+
+/* ====== Section & column type detection ====== */
+function sectionKeyFromHeader(h){
+  if(!h) return null;
+  const m = String(h).match(/\\[([A-Za-z0-9_]+)\\]/);
+  if(!m) return null;
+  return m[1].replace(/_.*/, ''); // BR_1 -> BR
+}
+function isMetaHeader(h){
+  const l = lower(h||'');
+  return TS_KEYS.some(k => l === lower(k)) || META_HINTS.some(hint => l.includes(hint));
+}
+function isPhotoHeader(h){ return PHOTO_HINTS.some(hint => lower(h||'').includes(hint)); }
+function isCommentOnlyHeader(h){ return COMMENT_HINTS.some(hint => lower(h||'').includes(hint)); }
+
+/* ====== Classification ====== */
+function classifyAnswer(val){
+  if(val==null) return 'ignore';
+  const raw = String(val).trim();
+  if(!raw) return 'ignore';
+  if(isUrlish(raw)) return 'ignore';
+
+  const norm = normalizeToken(raw);
+  const tokens = norm.replace(/[^a-z]+/g,' ').trim().split(/\\s+/);
+
+  const hasYes = tokens.includes('yes') || tokens.includes('si'); // 'sí' -> 'si'
+  const hasNo  = tokens.includes('no');
+
+  if (hasYes) return 'pass';
+  if (hasNo)  return 'fail';
+  return 'ignore';
+}
+
+/* ====== CSV pre-clean ====== */
+function sanitizeCsvText(text){
+  if (text && text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // strip BOM
+  return text.replace(/\\r\\n/g,'\\n').replace(/\\r/g,'\\n');
+}
+
+/* ====== CSV loader ====== */
+async function loadCsv(){
+  const url = new URL(CSV_URL);
+  url.searchParams.set('_ts_', Date.now());
+  const res = await fetch(url.toString(), { cache:'no-store', mode:'cors' });
+  if(!res.ok) throw new Error(\`HTTP \${res.status} fetching CSV\`);
+  const raw = await res.text();
+  const cleaned = sanitizeCsvText(raw);
+
+  return new Promise((resolve)=>{
+    Papa.parse(cleaned, {
+      header: true,
+      dynamicTyping: false,
+      skipEmptyLines: 'greedy',
+      /* worker: true,  <-- do NOT use worker when transform functions are present */
+      transformHeader: h => fixMojibake(String(h||'').trim()),
+      transform: v => fixMojibake(v),
+      complete: (results)=>{
+        const errors = (results.errors || []).filter(e =>
+          !(String(e.message||'').includes('Trailing quote on quoted field is malformed') &&
+            (e.row === 0 || e.row == null))
+        );
+        if (errors.length){
+          const first = errors[0];
+          setError(\`CSV parse warnings: \${first.message} @ row \${first.row ?? '?'}\`);
+        } else {
+          setError('');
+        }
+        resolve(results.data || []);
+      }
+    });
+  });
+}
+
+/* ====== Aggregation (with details for issues) ====== */
+function aggregate(rows){
+  const agg = { sections:{}, photos:{}, details:{}, overall:{passes:0,fails:0,total:0,rate:0} };
+  let sawBracketCode = false;
+  const headers = rows.length ? Object.keys(rows[0] ?? {}) : [];
+  const photoSeen = new Set();
+
+  rows.forEach(row=>{
+    headers.forEach(header=>{
+      if(isMetaHeader(header)) return;
+      const val = row[header];
+
+      const code = sectionKeyFromHeader(header);
+      if(code) sawBracketCode = true;
+      const key = code || 'ALL';
+
+      if(isPhotoHeader(header)){
+        const urls = String(val||'').split(/[\\s,;\\n\\r]+/).filter(u=>isUrlish(u));
+        if(urls.length){
+          if(!agg.photos[key]) agg.photos[key]=[];
+          const ts = parseTimestamp(row) || new Date();
+          for(const u of urls){
+            if(!photoSeen.has(u)){ photoSeen.add(u); agg.photos[key].push({url:u, ts}); }
+          }
+        }
+        return;
+      }
+      if(isCommentOnlyHeader(header)) return;
+
+      const cls = classifyAnswer(val);
+      if(cls === 'ignore') return;
+
+      if(!agg.sections[key]) agg.sections[key] = {passes:0,fails:0,total:0};
+      if(!agg.details[key]) agg.details[key] = [];
+
+      const passed = (cls === 'pass');
+      if(passed) agg.sections[key].passes += 1; else agg.sections[key].fails += 1;
+      agg.sections[key].total += 1;
+
+      // Store exact question/answer
+      agg.details[key].push({
+        question: header,
+        answer: String(val),
+        pass: passed
+      });
+    });
+  });
+
+  if(!sawBracketCode && Object.keys(agg.photos).length){
+    const merged={ALL:[]}; Object.values(agg.photos).forEach(arr=>merged.ALL.push(...arr)); agg.photos=merged;
+  }
+
+  Object.values(agg.sections).forEach(s=>{
+    agg.overall.passes += s.passes;
+    agg.overall.fails  += s.fails;
+    agg.overall.total  += s.total;
+  });
+  agg.overall.rate = agg.overall.total ? (agg.overall.passes/agg.overall.total*100) : 0;
+
+  return agg;
+}
+
+/* ====== Rendering ====== */
+function clampPercent(v){ v = Math.max(0, Math.min(100, v)); return v; }
+function sectionName(code){ return code==='ALL' ? 'All Checks' : (FRIENDLY[code] ? `${FRIENDLY[code]}${code==='ALL'?'':` (${code})`}` : code); }
+
+function renderTiles(agg){
+  const tiles=document.getElementById('tiles'); tiles.textContent='';
+  const keys=Object.keys(agg.sections).sort();
+  if(!keys.length){
+    const d=document.createElement('div'); d.className='small'; d.textContent='No questions to score. Check your CSV columns.'; tiles.appendChild(d);
+    return;
+  }
+  keys.forEach(k=>{
+    const s=agg.sections[k];
+    const rate=s.total?Math.round((s.passes/s.total)*100):null;
+    const pct = rate==null?0:clampPercent(rate);
+    const dash = \`\${pct},\${100-pct}\`;
+    const center = rate===null?'No Data':\`\${pct}%\`;
+
+    // Improved donut colors
+    const stroke = rate===null ? '#D1D5DB' : (pct>=90 ? '#10B981' : (pct>=70 ? '#F59E0B' : '#EF4444'));
+
+    const pill = (()=>{
+      const span = document.createElement('span');
+      span.className = 'pill ' + (s.total===0?'na':(s.fails>0?'bad':'ok'));
+      span.textContent = s.total===0 ? 'No data' : (s.fails>0 ? \`\${s.fails} issue\${s.fails>1?'s':''}\` : 'Clear');
+      span.title = \`\${s.passes}/\${s.total} passed\`;
+      return span;
+    })();
+    const nameText = sectionName(k);
+
+    const a=document.createElement('a'); a.className='tile'; a.href='#sec-'+slug(k);
+    a.setAttribute('rel','nofollow');
+    a.setAttribute('aria-label', \`\${nameText}: \${center}\`);
+    const svgNS='http://www.w3.org/2000/svg';
+    const svg=document.createElementNS(svgNS,'svg'); svg.setAttribute('class','donut'); svg.setAttribute('viewBox','0 0 36 36'); svg.setAttribute('role','img');
+    const titleEl=document.createElementNS(svgNS,'title'); titleEl.textContent=\`\${nameText} — \${center}\`; svg.appendChild(titleEl);
+    const c1=document.createElementNS(svgNS,'circle'); c1.setAttribute('cx','18'); c1.setAttribute('cy','18'); c1.setAttribute('r','15.915'); c1.setAttribute('fill','none'); c1.setAttribute('stroke','#EAEFF5'); c1.setAttribute('stroke-width','3.8'); svg.appendChild(c1);
+    const c2=document.createElementNS(svgNS,'circle'); c2.setAttribute('cx','18'); c2.setAttribute('cy','18'); c2.setAttribute('r','15.915'); c2.setAttribute('fill','none'); c2.setAttribute('stroke', stroke); c2.setAttribute('stroke-width','3.8'); c2.setAttribute('stroke-linecap','round'); c2.setAttribute('stroke-dasharray',dash); svg.appendChild(c2);
+    const t=document.createElementNS(svgNS,'text'); t.setAttribute('x','18'); t.setAttribute('y','20'); t.setAttribute('text-anchor','middle'); t.textContent=center; svg.appendChild(t);
+
+    const nameEl=document.createElement('div'); nameEl.className='name'; nameEl.textContent=nameText;
+
+    a.appendChild(svg);
+    a.appendChild(nameEl);
+    a.appendChild(pill);
+    tiles.appendChild(a);
+  });
+}
+
+function toDrivePreview(u){
+  try{
+    if(!u.includes('drive.google.com')) return null;
+    const m = u.match(/\\/file\\/d\\/([^/]+)\\//);
+    let id = m ? m[1] : null;
+    if(!id){ const url = new URL(u); id = url.searchParams.get('id'); }
+    return id ? ('https://drive.google.com/file/d/'+id+'/preview') : null;
+  }catch{ return null; }
+}
+
+function renderPhotos(agg){
+  const wrap=document.getElementById('photoSections'); wrap.textContent='';
+  const keys=Object.keys(agg.photos).sort();
+  if(!keys.length){
+    const d=document.createElement('div'); d.className='small'; d.textContent='No photos detected for this period.'; wrap.appendChild(d);
+    return;
+  }
+  keys.forEach(k=>{
+    const id='sec-'+slug(k);
+    const sec=document.createElement('div'); sec.className='section'; sec.id=id;
+    const title = sectionName(k);
+    const h=document.createElement('div'); h.className='sec-title'; h.textContent=title + \` (\${(agg.photos[k]||[]).length})\`;
+    const g=document.createElement('div'); g.className='gallery';
+
+    (agg.photos[k]||[]).forEach(({url,ts})=>{
+      const fig=document.createElement('figure'); fig.className='ph';
+      const img=document.createElement('img'); img.alt=title+' photo'; img.loading='lazy'; img.referrerPolicy='no-referrer'; img.decoding='async'; img.src=url;
+      img.onerror=()=>{
+        const prev=toDrivePreview(url);
+        if(prev){const ifr=document.createElement('iframe'); ifr.loading='lazy'; ifr.referrerPolicy='no-referrer'; ifr.src=prev; fig.appendChild(ifr); img.remove();}
+        else{const a=document.createElement('a'); a.href=url; a.target='_blank'; a.rel='noopener'; a.textContent='Open Photo'; img.replaceWith(a);} };
+      const cap=document.createElement('figcaption');
+      const left=document.createElement('span'); left.className='cap-left'; left.textContent=title;
+      const right=document.createElement('span'); right.className='cap-right'; right.textContent=(new Date(ts)).toLocaleString();
+      cap.appendChild(left); cap.appendChild(right);
+      fig.appendChild(img); fig.appendChild(cap); g.appendChild(fig);
+    });
+
+    sec.appendChild(h); sec.appendChild(g); wrap.appendChild(sec);
+  });
+}
+
+/* ====== Issues Summary (exact failures) ====== */
+function renderIssuesSummary(agg){
+  const wrap = document.getElementById('issuesSummary');
+  if(!wrap) return;
+  wrap.textContent = '';
+
+  const categories = Object.keys(agg.details || {}).filter(
+    k => (agg.details[k]||[]).some(item => !item.pass)
+  );
+
+  if (!categories.length) {
+    wrap.textContent = 'No issues found — all checks passed.';
+    return;
+  }
+
+  categories.sort().forEach(k => {
+    const sec = document.createElement('div');
+    const title = document.createElement('h3');
+    title.textContent = sectionName(k);
+    sec.appendChild(title);
+
+    const list = document.createElement('ul');
+    (agg.details[k] || [])
+      .filter(item => !item.pass)
+      .forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = \`\${item.question} — Reported: \${item.answer}\`;
+        list.appendChild(li);
+      });
+    sec.appendChild(list);
+
+    wrap.appendChild(sec);
+  });
+}
+
+/* ====== Year/Month + Inspection controls ====== */
+function monthLabel(m){ return monthName(m); }
+
+function populateSelectors(){
+  const ySel=document.getElementById('year');
+  const mSel=document.getElementById('month');
+  const iSel=document.getElementById('inspection');
+  const iLbl=document.getElementById('inspectionLabel');
+
+  ySel.textContent='';
+  YEARS.forEach(y=>{ const opt=document.createElement('option'); opt.value=y; opt.textContent=y; ySel.appendChild(opt); });
+  if(YEARS.length) ySel.value = YEARS[YEARS.length-1];
+
+  function fillMonths(y){
+    mSel.textContent='';
+    const months=(MONTHS_BY_YEAR[String(y)]||[]).sort((a,b)=>a-b);
+    months.forEach(m=>{
+      const opt=document.createElement('option');
+      opt.value=m; opt.textContent=monthLabel(m);
+      mSel.appendChild(opt);
+    });
+    if(months.length) mSel.value = months[months.length-1];
+    fillInspections();
+  }
+
+  function fillInspections(){
+    const y = parseInt(ySel.value,10);
+    const m = parseInt(mSel.value,10);
+    const monthRows = RAW_ROWS.filter(r=>{
+      const d = deriveYM(r); return d.year===y && d.month===m;
+    }).sort((a,b)=> (parseTimestamp(b)?.getTime()||0) - (parseTimestamp(a)?.getTime()||0));
+
+    iSel.textContent='';
+    if(monthRows.length <= 1){
+      iSel.classList.add('hidden'); iLbl.classList.add('hidden');
+      return;
+    }
+    iSel.classList.remove('hidden'); iLbl.classList.remove('hidden');
+
+    const optAll = document.createElement('option'); optAll.value='all'; optAll.textContent='All inspections in month'; iSel.appendChild(optAll);
+    monthRows.forEach((row, idx)=>{
+      const d = parseTimestamp(row);
+      const label = idx===0 ? \`Inspection \${idx+1} (Newest)\` : \`Inspection \${idx+1}\`;
+      const opt = document.createElement('option');
+      opt.value = String(idx);
+      opt.textContent = label + (d? \` — \${new Intl.DateTimeFormat(undefined, {year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}).format(d)}\` : '');
+      iSel.appendChild(opt);
+    });
+    iSel.value = 'all';
+  }
+
+  fillMonths(ySel.value);
+  ySel.addEventListener('change', ()=>{ fillMonths(ySel.value); applySelection(); persistSelection(); });
+  mSel.addEventListener('change', ()=>{ fillInspections(); applySelection(); persistSelection(); });
+  iSel.addEventListener('change', ()=>{ applySelection(); persistSelection(); });
+}
+
+function persistSelection(){
+  const y = document.getElementById('year').value;
+  const m = document.getElementById('month').value;
+  const iSel = document.getElementById('inspection');
+  const i = (!iSel.classList.contains('hidden') ? iSel.value : 'all');
+  const qs = new URLSearchParams(location.search);
+  qs.set('y', y); qs.set('m', m); qs.set('i', i);
+  if(csvParam && csvParam.trim()) qs.set('csv', csvParam.trim());
+  history.replaceState(null, '', `${location.pathname}?${qs.toString()}`);
+}
+
+function applySelection(){
+  const y = parseInt(document.getElementById('year').value,10);
+  const m = parseInt(document.getElementById('month').value,10);
+  const iSel = document.getElementById('inspection');
+
+  let monthRows = RAW_ROWS.filter(r=>{
+    const d = deriveYM(r);
+    return d.year===y && d.month===m;
+  }).sort((a,b)=> (parseTimestamp(b)?.getTime()||0) - (parseTimestamp(a)?.getTime()||0));
+
+  if(!iSel.classList.contains('hidden') && iSel.value !== 'all'){
+    const idx = parseInt(iSel.value,10);
+    if(!Number.isNaN(idx) && monthRows[idx]) monthRows = [monthRows[idx]];
+  }
+
+  const agg = aggregate(monthRows);
+  const label = monthRows.length ? `${monthName(m)} ${y}${(!iSel.classList.contains('hidden') && iSel.value!=='all') ? ' — '+iSel.options[iSel.selectedIndex].text : ''}` : 'No data';
+  document.getElementById('summaryDate').textContent = label;
+  renderIssuesSummary(agg);
+  renderTiles(agg);
+  renderPhotos(agg);
+}
+
+/* ====== Index & title address ====== */
+function deriveAddress(rows){
+  if(!rows || !rows.length) return '';
+  const headers = Object.keys(rows[0]||{});
+  let addrCol = headers.find(h=> ADDRESS_HINTS.some(hint=> lower(h).includes(hint)) ) || '';
+  if(!addrCol){ addrCol = headers.find(h => /property|propiedad/i.test(h)) || ''; }
+  if(addrCol){
+    for(const r of rows){
+      const v = r[addrCol];
+      if(v && String(v).trim()) return String(v).trim();
+    }
+  }
+  return '';
+}
+
+function buildIndex(rows){
+  const years = new Set();
+  const monthsByYear = {};
+  let latest = { ts:0, year:undefined, month:undefined };
+
+  rows.forEach(r=>{
+    const d = parseTimestamp(r);
+    if(!d) return;
+    const y = d.getFullYear();
+    const m = d.getMonth()+1;
+    years.add(y);
+    if(!monthsByYear[y]) monthsByYear[y] = new Set();
+    monthsByYear[y].add(m);
+    const t = d.getTime();
+    if(t > latest.ts) latest = { ts:t, year:y, month:m };
+  });
+
+  YEARS = Array.from(years).sort((a,b)=>a-b);
+  MONTHS_BY_YEAR = {};
+  Object.entries(monthsByYear).forEach(([y,set])=>{
+    MONTHS_BY_YEAR[y] = Array.from(set).sort((a,b)=>a-b);
+  });
+  LATEST_YM = { year: latest.year, month: latest.month };
+}
+
+function jumpToLast(){
+  if(!LATEST_YM.year || !LATEST_YM.month) return;
+  const ySel=document.getElementById('year');
+  const mSel=document.getElementById('month');
+  ySel.value = String(LATEST_YM.year);
+  mSel.textContent='';
+  (MONTHS_BY_YEAR[String(LATEST_YM.year)]||[]).sort((a,b)=>a-b).forEach(m=>{
+    const opt=document.createElement('option');
+    opt.value=m; opt.textContent=monthName(m); mSel.appendChild(opt);
+  });
+  mSel.value = String(LATEST_YM.month);
+  const iSel=document.getElementById('inspection');
+  iSel.classList.add('hidden');
+  document.getElementById('inspectionLabel').classList.add('hidden');
+  applySelection();
+}
+
+/* ====== Boot ====== */
+async function loadAndRender(){
+  setError('');
+  document.getElementById('summaryDate').textContent = 'Loading…';
+  try{
+    RAW_ROWS = await loadCsv();
+    if(!RAW_ROWS.length){ setError('No data rows found in CSV.'); }
+
+    // Address in title (URL param overrides CSV)
+    const addrParam = params.get('address') || params.get('addr');
+    const address = (addrParam && addrParam.trim()) ? addrParam.trim() : deriveAddress(RAW_ROWS);
+    if(address){
+      document.title = `Owner Inspection — ${address}`;
+      const h1 = document.getElementById('pageTitle');
+      if(h1){ h1.textContent = `Owner Inspection — ${address} — Year / Month`; }
+    }
+
+    buildIndex(RAW_ROWS);
+    populateSelectors();
+
+    // Restore from URL if present
+    const y = params.get('y'); const m = params.get('m'); const i = params.get('i');
+    if(y && YEARS.includes(+y)) document.getElementById('year').value = y;
+    if(m && (MONTHS_BY_YEAR[String(document.getElementById('year').value)]||[]).includes(+m)){
+      const mSel=document.getElementById('month'); mSel.value = m;
+    }
+    // Rebuild inspections for current YM
+    (function refreshInspections(){
+      const ySelVal = document.getElementById('year').value;
+      const mSelVal = document.getElementById('month').value;
+      const iSel=document.getElementById('inspection');
+      const iLbl=document.getElementById('inspectionLabel');
+      const monthRows = RAW_ROWS.filter(r=>{
+        const d = deriveYM(r); return String(d.year)===String(ySelVal) && String(d.month)===String(mSelVal);
+      }).sort((a,b)=> (parseTimestamp(b)?.getTime()||0) - (parseTimestamp(a)?.getTime()||0));
+      iSel.textContent='';
+      if(monthRows.length <= 1){ iSel.classList.add('hidden'); iLbl.classList.add('hidden'); }
+      else{
+        iSel.classList.remove('hidden'); iLbl.classList.remove('hidden');
+        const optAll = document.createElement('option'); optAll.value='all'; optAll.textContent='All inspections in month'; iSel.appendChild(optAll);
+        monthRows.forEach((row, idx)=>{
+          const d = parseTimestamp(row);
+          const label = idx===0 ? `Inspection ${idx+1} (Newest)` : `Inspection ${idx+1}`;
+          const opt = document.createElement('option');
+          opt.value = String(idx);
+          opt.textContent = label + (d? ` — ${new Intl.DateTimeFormat(undefined, {year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}).format(d)}` : '');
+          iSel.appendChild(opt);
+        });
+        iSel.value = (i && i !== 'all') ? i : 'all';
+      }
+    })();
+
+    if (YEARS.length){
+      applySelection();
+    } else {
+      document.getElementById('summaryDate').textContent = 'No dated rows';
+      document.getElementById('tiles').innerHTML = '<div class="small">No timestamped responses found.</div>';
+      document.getElementById('photoSections').innerHTML = '';
+    }
+  }catch(err){
+    console.error(err);
+    setError(err.message || 'Failed to load');
+    document.getElementById('summaryDate').textContent = 'Failed to load';
+    document.getElementById('tiles').innerHTML = '<div class="small">Could not load data.</div>';
+    document.getElementById('photoSections').innerHTML = '';
+  }
+}
+
+document.getElementById('applyYM').addEventListener('click', ()=>{ applySelection(); persistSelection(); });
+document.getElementById('lastBtn').addEventListener('click', jumpToLast);
+window.addEventListener('DOMContentLoaded', loadAndRender);
+</script>
+</body>
+</html>
