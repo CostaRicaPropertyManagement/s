@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Owner Inspection — Live (Google Sheets CSV)</title>
+<title>Owner Inspection — Live (Google Sheets CSV only)</title>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <style>
 :root{--bg:#fff;--ink:#111827;--muted:#6B7280;--line:#E5E7EB;--ok:#287271;--bad:#9B2226;--brand:#1F2937}
@@ -63,19 +63,8 @@ select,button{border:1px solid var(--line);border-radius:8px;padding:8px 10px;fo
 </div>
 
 <script>
-/* ====== CONFIG ======
- * If you have the direct CSV link, put it here (ideally with gid of "Form Responses 1"):
- * Example you gave: https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?output=csv
- * To lock to a specific sheet: .../pub?gid=GID&single=true&output=csv
- */
+/* ====== CONFIG (CSV only) ====== */
 const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTH18JY92PQUibhQfTwhTcJZpEEuz-NrBbe4fUWAB0lSCT2tY-X9GwIVEQhr8XCHEH08EHfq3vav1Td/pub?output=csv';
-
-/* Optional: if CSV_URL lacks gid, provide the pubhtml so we can look up
- * the gid for the tab named "Form Responses 1" and auto-build a gid CSV URL.
- * Leave as '' if not needed.
- */
-const PUBHTML_URL = 'https://docs.google.com/spreadsheets/u/5/d/e/2PACX-1vTH18JY92PQUibhQfTwhTcJZpEEuz-NrBbe4fUWAB0lSCT2tY-X9GwIVEQhr8XCHEH08EHfq3vav1Td/pubhtml';
-const TARGET_SHEET_NAME = 'Form Responses 1';
 
 /* ====== State ====== */
 let RAW_ROWS = [];
@@ -83,7 +72,7 @@ let YEARS = [];
 let MONTHS_BY_YEAR = {};
 let LATEST_YM = {year:undefined, month:undefined};
 
-/* ====== Column / rules ====== */
+/* ====== Columns / rules ====== */
 const TS_KEYS = ['Timestamp','timestamp','Marca temporal','marca temporal','Fecha','fecha','Fecha y hora','fecha y hora','Date','Datetime','date','datetime'];
 const META_HINTS = ['email','correo','name','nombre','inspector','by who','por quién','submitted','enviado'];
 const PHOTO_HINTS = ['photo','photos','foto','fotos','imagen','imágenes','image','images','picture','pictures','pic'];
@@ -114,9 +103,27 @@ function deriveYM(row){
   return d ? {year:d.getFullYear(), month:d.getMonth()+1} : {year:undefined, month:undefined};
 }
 
+/* ====== Mojibake & token normalization ====== */
+function fixMojibake(s){
+  return String(s ?? '')
+    // common UTF-8→Latin-1 mojibake fixes
+    .replace(/sÃ­/gi,'sí')
+    .replace(/Ã¡/g,'á').replace(/Ã©/g,'é').replace(/Ã­/g,'í').replace(/Ã³/g,'ó').replace(/Ãº/g,'ú')
+    .replace(/Ã±/g,'ñ')
+    .replace(/Â¿/g,'¿').replace(/Â¡/g,'¡')
+    .replace(/Â/g,'');
+}
+function normalizeToken(value){
+  let t = fixMojibake(value).trim().toLowerCase();
+  // also collapse extra spaces
+  t = t.replace(/\s+/g,' ');
+  return stripDiacritics(t);
+}
+
+/* ====== Section detection ====== */
 function sectionKeyFromHeader(h){
   if(!h) return null;
-  const m = String(h).match(/\[([A-Za-z0-9_]+)\]/); // look anywhere in header
+  const m = String(h).match(/\[([A-Za-z0-9_]+)\]/); // allow anywhere in header
   if(!m) return null;
   return m[1].replace(/_.*/, ''); // BR_1 -> BR
 }
@@ -127,103 +134,67 @@ function isMetaHeader(h){
 function isPhotoHeader(h){ return PHOTO_HINTS.some(hint => lower(h||'').includes(hint)); }
 function isCommentOnlyHeader(h){ return COMMENT_HINTS.some(hint => lower(h||'').includes(hint)); }
 
+/* ====== Classification (YES/SÍ/SI/SÃ­) ====== */
 function classifyAnswer(val){
   if(val==null) return 'ignore';
   const raw = String(val).trim();
   if(!raw) return 'ignore';
   if(isUrlish(raw)) return 'ignore';
-  const norm = stripDiacritics(raw).toLowerCase();
-  if(norm==='yes' || norm==='si' || norm==='sí') return 'pass';
-  if(norm==='no') return 'fail';
+  const norm = normalizeToken(raw); // fixes SÃ­ → sí, strips accent → si
+  if(norm === 'yes' || norm === 'si') return 'pass'; // 'sí' becomes 'si'
+  if(norm === 'no') return 'fail';
   return 'ignore';
 }
-function splitUrls(s){
-  if(!s) return [];
-  const parts = String(s).split(/[\s,;\n\r]+/).filter(Boolean);
-  return parts.filter(isUrlish);
-}
-function toDrivePreview(u){
-  try{
-    if(!u.includes('drive.google.com')) return null;
-    const m = u.match(/\/file\/d\/([^/]+)\//);
-    let id = m ? m[1] : null;
-    if(!id){ const url = new URL(u); id = url.searchParams.get('id'); }
-    return id ? ('https://drive.google.com/file/d/'+id+'/preview') : null;
-  }catch{ return null; }
-}
 
-/* ====== CSV loader ====== */
-async function resolveCsvUrl(){
-  // If CSV already specifies gid, just use it.
-  if(/[\?&]gid=/.test(CSV_URL)) return CSV_URL;
+/* ====== CSV pre-clean to avoid "Trailing quote..." ====== */
+function sanitizeCsvText(text){
+  // 1) normalize newlines
+  let t = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
 
-  // If we have pubhtml, find the gid of TARGET_SHEET_NAME and build a single-sheet CSV URL.
-  if(PUBHTML_URL){
-    const items = await getWidgetItems(PUBHTML_URL);
-    const exact = items.find(it => it.name.trim() === TARGET_SHEET_NAME);
-    const chosen = exact || items[0];
-    if(!exact) setError(`Sheet "${TARGET_SHEET_NAME}" not found; using "${chosen.name}".`);
-    // Build CSV equivalent: /pub?gid=...&single=true&output=csv
-    const base = new URL(PUBHTML_URL);
-    // Convert .../pubhtml -> .../pub
-    const csvBase = base.href.replace(/\/pubhtml(\b|$)/, '/pub');
-    const u = new URL(csvBase);
-    u.searchParams.set('gid', chosen.gid);
-    u.searchParams.set('single', 'true');
-    u.searchParams.set('output', 'csv');
-    u.searchParams.set('_ts_', Date.now());
-    return u.toString();
-  }
+  // 2) smart quotes/apostrophes → ASCII
+  t = t
+    .replace(/[\u201C\u201D]/g,'"') // “ ”
+    .replace(/[\u2018\u2019]/g,"'"); // ‘ ’
 
-  // Use as-is (first sheet)
-  const u = new URL(CSV_URL);
-  u.searchParams.set('_ts_', Date.now());
-  return u.toString();
-}
-
-function unescapeJsString(s){
-  return s
-    .replace(/\\x3d/gi,'=')
-    .replace(/\\x26/gi,'&')
-    .replace(/\\\//g,'/')
-    .replace(/&amp;/gi,'&');
-}
-async function getWidgetItems(pubhtml){
-  const res = await fetch(pubhtml + (pubhtml.includes('?')?'&':'?') + '_ts_=' + Date.now(), {cache:'no-store', mode:'cors'});
-  if(!res.ok) throw new Error('Failed to fetch pubhtml: '+res.status);
-  const html = await res.text();
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const scripts = Array.from(doc.querySelectorAll('script'));
-  const items = [];
-  const re = /items\.push\(\{\s*name:\s*"([^"]+)"\s*,\s*pageUrl:\s*"([^"]+)"\s*,\s*gid:\s*"(-?\d+)"/g;
-  for(const s of scripts){
-    const text = s.textContent || '';
-    let m;
-    while((m = re.exec(text))!==null){
-      items.push({ name: m[1], pageUrl: unescapeJsString(m[2]), gid: m[3] });
+  // 3) Try to repair lines with an odd number of double-quotes by doubling stray quotes
+  const lines = t.split('\n');
+  for(let i=0;i<lines.length;i++){
+    const line = lines[i];
+    const qCount = (line.match(/"/g)||[]).length;
+    if(qCount % 2 !== 0){
+      // Heuristic: replace single unescaped " with "" inside fields
+      lines[i] = line.replace(/"(?=[^",]*($|,))/g,'""');
     }
   }
-  if(!items.length) throw new Error('No sheets listed in pubhtml widget.');
-  return items;
+  t = lines.join('\n');
+
+  return t;
 }
 
+/* ====== CSV loader (download → clean → parse) ====== */
 async function loadCsv(){
-  const url = await resolveCsvUrl();
-  return new Promise((resolve, reject)=>{
-    Papa.parse(url, {
-      download: true,
+  const url = new URL(CSV_URL);
+  url.searchParams.set('_ts_', Date.now());
+  const res = await fetch(url.toString(), {cache:'no-store', mode:'cors'});
+  if(!res.ok) throw new Error(`HTTP ${res.status} fetching CSV`);
+  const raw = await res.text();
+
+  const cleaned = sanitizeCsvText(raw);
+
+  return new Promise((resolve)=>{
+    Papa.parse(cleaned, {
       header: true,
       dynamicTyping: false,
       skipEmptyLines: 'greedy',
       transformHeader: h => (h||'').trim(),
+      transform: v => fixMojibake(v),
       complete: (results)=>{
+        // Do not hard-fail on warnings; surface first warning text only
         if(results.errors && results.errors.length){
-          setError('CSV parse warnings: '+results.errors[0].message);
+          const first = results.errors[0];
+          setError(`CSV parse warnings: ${first.message} @ row ${first.row ?? '?'}`);
         }
         resolve(results.data || []);
-      },
-      error: (err, file, inputElem, reason)=>{
-        reject(new Error('PapaParse error: '+(err?.message || reason || 'Unknown')));
       }
     });
   });
@@ -246,7 +217,7 @@ function aggregate(rows){
       const key = code || 'ALL';
 
       if(isPhotoHeader(header)){
-        const urls = splitUrls(val);
+        const urls = String(val||'').split(/[\s,;\n\r]+/).filter(u=>isUrlish(u));
         if(urls.length){
           if(!agg.photos[key]) agg.photos[key]=[];
           agg.photos[key].push(...urls.map(u=>({url:u, ts: parseTimestamp(row)||new Date()})));
@@ -279,8 +250,6 @@ function aggregate(rows){
 }
 
 /* ====== Rendering ====== */
-function monthLabel(m){ return monthName(m); }
-
 function renderTiles(agg){
   const tiles=document.getElementById('tiles'); tiles.innerHTML='';
   const keys=Object.keys(agg.sections).sort();
@@ -305,6 +274,16 @@ function renderTiles(agg){
     <div class="name">${name}</div>${pill}`;
     tiles.appendChild(a);
   });
+}
+
+function toDrivePreview(u){
+  try{
+    if(!u.includes('drive.google.com')) return null;
+    const m = u.match(/\/file\/d\/([^/]+)\//);
+    let id = m ? m[1] : null;
+    if(!id){ const url = new URL(u); id = url.searchParams.get('id'); }
+    return id ? ('https://drive.google.com/file/d/'+id+'/preview') : null;
+  }catch{ return null; }
 }
 
 function renderPhotos(agg){
@@ -339,6 +318,8 @@ function renderPhotos(agg){
 }
 
 /* ====== Year/Month controls ====== */
+function monthLabel(m){ return monthName(m); }
+
 function populateSelectors(){
   const ySel=document.getElementById('year');
   const mSel=document.getElementById('month');
@@ -420,8 +401,7 @@ async function loadAndRender(){
   setError('');
   document.getElementById('summaryDate').textContent = 'Loading…';
   try{
-    const rows = await loadCsv();
-    RAW_ROWS = rows;
+    RAW_ROWS = await loadCsv();
     buildIndex(RAW_ROWS);
     populateSelectors();
     applyYearMonth();
